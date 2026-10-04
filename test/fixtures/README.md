@@ -1,0 +1,6 @@
+# Test fixtures
+
+- `still-tiny.heic` is a real HEVC HEIC still (`ftypheic` / `mif1` / `hvc1`). The embedded XMP names a Sony DSLR-A550; it is not an iPhone camera-roll file. Downloaded from <https://heic.best/samples/heic/still-tiny.heic>, where the publisher describes the set as public-domain photographs encoded as HEIC, without GPS. Local runs on `NetVips.Native` assert that this file does not decode. The Docker image with `libheif-plugin-libde265` asserts that it does, and that `Render` with `Fit.Max` produces a JPEG.
+- `sRGB.icm` is the Hewlett-Packard sRGB IEC61966-2.1 profile, used only to assert color-profile policy. Copyright (c) 1998 Hewlett-Packard Company. Provided as-is.
+- `src/jaytwo.Ergonomics.Images/Probes/heic-probe.heic` is a 32x24 frame encoded with `heif-enc` and x265. It is embedded so `ImageTransforms.Capabilities.Heic` has to decode HEVC pixels, not just open a HEIF header. Encode support is a separate check, `Encodes(ImageOutputFormat.Heic)`. The package does not contain x265 or libde265.
+- `src/jaytwo.Ergonomics.Images/Probes/avif-probe.avif` is a 16x16 frame encoded with `NetVips.Native` (libaom). It is embedded so `ImageTransforms.Capabilities.Avif` has to decode AV1 pixels, not just open a HEIF header. Encode support is a separate check, `Encodes(ImageOutputFormat.Avif)`.
