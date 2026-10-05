@@ -3,7 +3,7 @@ using System;
 namespace jaytwo.Ergonomics.Images;
 
 /// <summary>
-/// Fit, frame, and canvas for one <see cref="ImageTransforms"/> resize.
+/// Fit, frame, and canvas for one <see cref="ImageTransforms"/> resize shortcut (compiles to <see cref="ImagePipeline"/>).
 /// </summary>
 /// <remarks>
 /// <see cref="Fit"/> defaults to <see cref="ImageFit.Fit"/>.

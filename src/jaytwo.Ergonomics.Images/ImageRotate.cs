@@ -3,7 +3,7 @@ using System;
 namespace jaytwo.Ergonomics.Images;
 
 /// <summary>
-/// Angle, bounds, and canvas for one <see cref="ImageTransforms.Rotate"/>.
+/// Angle, bounds, and canvas for one <see cref="ImageTransforms.Rotate"/> shortcut (compiles to <see cref="ImagePipeline"/>).
 /// </summary>
 /// <remarks>
 /// <see cref="Bounds"/> defaults to <see cref="RotationBounds.Expand"/>.
@@ -52,7 +52,7 @@ public sealed record ImageRotate
     /// </summary>
     /// <remarks>
     /// Defaults to transparent. A multiple of 90 degrees adds no corners, so the canvas has nothing to paint.
-    /// A format that cannot store alpha flattens those corners with <see cref="ImageEncode.AlphaFallbackColor"/>.
+    /// A format that cannot store alpha flattens those corners with <see cref="ImageEncoding.JpegEncoding.AlphaFallbackColor"/>.
     /// </remarks>
     public ImageCanvas? Canvas { get; init; }
 

@@ -8,9 +8,9 @@ namespace jaytwo.Ergonomics.Images;
 /// Opinionated image transforms for application code.
 /// </summary>
 /// <remarks>
-/// Transforms run on the calling thread. libvips reads and writes
-/// through the native pipeline even when the <see cref="Stream"/> is a network stream, so an async wrapper
-/// would only schedule that work onto a thread pool.
+/// Prefer <see cref="ImagePipeline"/> for ordered composition.
+/// These shortcuts compile into a pipeline and call sync <see cref="ImagePipeline.Run"/>.
+/// For ASP.NET bodies use <see cref="ImagePipeline.RunAsync"/>.
 /// The first call also sets the libvips operation cache size to 0 for this process. The cache retains
 /// source images, which is the wrong default for unique uploads. Set it again after startup when
 /// another part of the process depends on that cache.
@@ -60,7 +60,7 @@ public static class ImageTransforms
     /// Pass one side to derive the other from the aspect ratio. When both are set, the result
     /// fits inside the box and one side can be shorter. The whole image stays visible.
     /// <paramref name="enlarge"/> false leaves a source smaller than the box at its own size.
-    /// A fit, a canvas, or an aspect ratio belongs on <see cref="ImageResize"/>.
+    /// A fit, a canvas, or an aspect ratio belongs on <see cref="ImageResize"/> or <see cref="ImagePipeline"/>.
     /// </remarks>
     /// <returns>The width and height written.</returns>
     public static ImageSize Resize(
@@ -111,23 +111,7 @@ public static class ImageTransforms
             throw new ArgumentNullException(nameof(resize));
         }
 
-        Validate(resize);
-        RequireStreams(source, destination);
-        var settings = Settings(resize.Encode, nameof(resize));
-        var frame = Resolve(resize);
-        return ImageEngine.Execute(
-            source,
-            destination,
-            resize.Format,
-            resize.Fit,
-            frame.Width,
-            frame.Height,
-            frame.NativeAspect,
-            resize.Enlarge,
-            resize.Canvas,
-            resize.SourceAlpha,
-            resize.Focus,
-            settings);
+        return ImagePipeline.FromResize(resize).Run(source, destination);
     }
 
     /// <summary>
@@ -147,18 +131,7 @@ public static class ImageTransforms
             throw new ArgumentNullException(nameof(rotate));
         }
 
-        Validate(rotate);
-        RequireStreams(source, destination);
-        return ImageEngine.ExecuteRotate(
-            source,
-            destination,
-            rotate.Format,
-            rotate.Rotation,
-            rotate.Bounds,
-            rotate.Aspect,
-            rotate.Canvas,
-            rotate.SourceAlpha,
-            Settings(rotate.Encode, nameof(rotate)));
+        return ImagePipeline.FromRotate(rotate).Run(source, destination);
     }
 
     internal static ImageEncode Settings(ImageEncode? encode, string paramName)
@@ -201,157 +174,6 @@ public static class ImageTransforms
         }
 
         return new Frame(null, null, aspect);
-    }
-
-    private static void RequireStreams(Stream source, Stream destination)
-    {
-        if (source is null)
-        {
-            throw new ArgumentNullException(nameof(source));
-        }
-
-        if (destination is null)
-        {
-            throw new ArgumentNullException(nameof(destination));
-        }
-
-        if (!source.CanRead)
-        {
-            throw new ArgumentException("The source stream must be readable.", nameof(source));
-        }
-
-        if (!destination.CanWrite)
-        {
-            throw new ArgumentException("The destination stream must be writable.", nameof(destination));
-        }
-    }
-
-    private static void Validate(ImageRotate rotate)
-    {
-        if (!Enum.IsDefined(typeof(RotationBounds), rotate.Bounds))
-        {
-            throw new ArgumentOutOfRangeException(nameof(rotate), "Bounds is not a known value.");
-        }
-
-        if (rotate.SourceAlpha is null)
-        {
-            throw new ArgumentNullException(nameof(rotate), "Source alpha is required.");
-        }
-
-        if (rotate.Aspect is ImageAspectRatio aspect && !aspect.IsInRange())
-        {
-            throw new ArgumentOutOfRangeException(nameof(rotate), "Aspect ratio must be finite and positive.");
-        }
-
-        if (rotate.Aspect is not null && rotate.Bounds != RotationBounds.Trim)
-        {
-            throw new ArgumentException("An aspect ratio applies with Trim.", nameof(rotate));
-        }
-
-        if (rotate.Canvas is not null && rotate.Bounds != RotationBounds.Expand)
-        {
-            throw new ArgumentException("A canvas applies with Expand.", nameof(rotate));
-        }
-    }
-
-    private static void Validate(ImageResize resize)
-    {
-        if (resize.Width is <= 0)
-        {
-            throw new ArgumentOutOfRangeException(nameof(resize), "Width must be positive.");
-        }
-
-        if (resize.Height is <= 0)
-        {
-            throw new ArgumentOutOfRangeException(nameof(resize), "Height must be positive.");
-        }
-
-        if (!Enum.IsDefined(typeof(ImageFit), resize.Fit))
-        {
-            throw new ArgumentOutOfRangeException(nameof(resize), "Fit is not a known value.");
-        }
-
-        if (resize.Focus is not null && resize.Fit != ImageFit.Zoom)
-        {
-            throw new ArgumentException("A focus box applies with Zoom.", nameof(resize));
-        }
-
-        if (resize.SourceAlpha is null)
-        {
-            throw new ArgumentNullException(nameof(resize), "Source alpha is required.");
-        }
-
-        if (resize.Aspect is ImageAspectRatio aspect && !aspect.IsInRange())
-        {
-            throw new ArgumentOutOfRangeException(nameof(resize), "Aspect ratio must be finite and positive.");
-        }
-
-        var hasWidth = resize.Width is not null;
-        var hasHeight = resize.Height is not null;
-        var hasAspect = resize.Aspect is not null;
-        var hasCanvas = resize.Canvas is not null;
-
-        switch (resize.Fit)
-        {
-            case ImageFit.Fit:
-                if (hasCanvas && !hasAspect && (!hasWidth || !hasHeight))
-                {
-                    throw new ArgumentException("A canvas needs a width and a height, or an aspect ratio.", nameof(resize));
-                }
-
-                if (!hasCanvas && hasAspect && !hasWidth && !hasHeight)
-                {
-                    throw new ArgumentException("Fit to an aspect ratio needs a canvas or a pixel size.", nameof(resize));
-                }
-
-                break;
-
-            case ImageFit.Zoom:
-                if (hasCanvas && resize.Focus is null)
-                {
-                    throw new ArgumentException("A canvas applies with Fit.", nameof(resize));
-                }
-
-                if (!hasAspect && (!hasWidth || !hasHeight))
-                {
-                    throw new ArgumentException("Zoom needs a width and a height, or an aspect ratio.", nameof(resize));
-                }
-
-                break;
-
-            case ImageFit.Stretch:
-                if (!resize.Enlarge)
-                {
-                    throw new ArgumentException("Stretch writes the requested size.", nameof(resize));
-                }
-
-                if (hasCanvas)
-                {
-                    throw new ArgumentException("A canvas applies with Fit.", nameof(resize));
-                }
-
-                if (hasWidth && hasHeight && hasAspect)
-                {
-                    throw new ArgumentException("Stretch uses the width and height as the exact size.", nameof(resize));
-                }
-
-                if (!HasExactSize(hasWidth, hasHeight, hasAspect))
-                {
-                    throw new ArgumentException("Stretch needs a width and a height.", nameof(resize));
-                }
-
-                break;
-        }
-    }
-
-    private static bool HasExactSize(bool hasWidth, bool hasHeight, bool hasAspect)
-    {
-        if (hasWidth && hasHeight)
-        {
-            return true;
-        }
-
-        return hasAspect && (hasWidth || hasHeight);
     }
 
     private static (int Width, int Height) FitInside(int boxWidth, int boxHeight, ImageAspectRatio aspect)

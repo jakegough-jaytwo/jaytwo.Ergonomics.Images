@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Threading;
 using NetVips;
 
 namespace jaytwo.Ergonomics.Images;
@@ -20,6 +21,71 @@ internal static class ImageEngine
         Tiff,
     }
 
+    public static ImageSize ExecutePipeline(
+        Stream source,
+        Stream destination,
+        PipelineOp[] ops,
+        AlphaBehavior sourceAlpha,
+        ImageEncoding encoding,
+        CancellationToken cancellationToken = default)
+    {
+        var encode = ToEncode(encoding);
+        var format = encoding.Format;
+
+        if (ops.Length == 1 && ops[0] is PipelineOp.ResizeOp resize)
+        {
+            return Execute(
+                source,
+                destination,
+                format,
+                resize.Fit,
+                resize.Width,
+                resize.Height,
+                resize.Aspect,
+                resize.Enlarge,
+                resize.Canvas,
+                sourceAlpha,
+                resize.Focus,
+                encode,
+                cancellationToken);
+        }
+
+        if (ops.Length == 1 && ops[0] is PipelineOp.RotateOp rotate)
+        {
+            return ExecuteRotate(
+                source,
+                destination,
+                format,
+                rotate.Rotation,
+                rotate.Bounds,
+                rotate.Aspect,
+                rotate.Canvas,
+                sourceAlpha,
+                encode,
+                cancellationToken);
+        }
+
+        if (ops.Length == 0)
+        {
+            return Execute(
+                source,
+                destination,
+                format,
+                ImageFit.Fit,
+                width: null,
+                height: null,
+                aspect: null,
+                enlarge: true,
+                canvas: null,
+                sourceAlpha,
+                focus: null,
+                encode,
+                cancellationToken);
+        }
+
+        return ExecuteOrdered(source, destination, ops, sourceAlpha, format, encode, cancellationToken);
+    }
+
     public static ImageSize Execute(
         Stream source,
         Stream destination,
@@ -32,7 +98,8 @@ internal static class ImageEngine
         ImageCanvas? canvas,
         AlphaBehavior sourceAlpha,
         ImageFocus? focus,
-        ImageEncode encode)
+        ImageEncode encode,
+        CancellationToken cancellationToken = default)
     {
         VipsRuntime.EnsureInitialized();
 
@@ -41,6 +108,7 @@ internal static class ImageEngine
             var owned = new List<IDisposable>();
             try
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 var input = PrepareInput(source, out var loaderOptions);
                 var plan = new Plan
                 {
@@ -59,7 +127,7 @@ internal static class ImageEngine
                 };
                 var image = Finish(Build(input, plan, loaderOptions, owned), plan, owned);
                 var size = new ImageSize(image.Width, image.Height);
-                Write(image, destination, format, plan);
+                Write(image, destination, format, plan, cancellationToken);
                 return size;
             }
             finally
@@ -69,6 +137,14 @@ internal static class ImageEngine
                     owned[i].Dispose();
                 }
             }
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception) when (cancellationToken.IsCancellationRequested)
+        {
+            throw new OperationCanceledException(cancellationToken);
         }
         catch (ImageException)
         {
@@ -85,7 +161,8 @@ internal static class ImageEngine
         Stream destination,
         ImageOutputFormat format,
         ImageEncode encode,
-        Func<Stream, string?, List<IDisposable>, Image> build)
+        Func<Stream, string?, List<IDisposable>, Image> build,
+        CancellationToken cancellationToken = default)
     {
         VipsRuntime.EnsureInitialized();
 
@@ -94,16 +171,18 @@ internal static class ImageEngine
             var owned = new List<IDisposable>();
             try
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 var input = PrepareInput(source, out var loaderOptions);
                 var image = build(input, loaderOptions, owned);
                 var size = new ImageSize(image.Width, image.Height);
-                Write(image, destination, format, new Plan
+                var writePlan = new Plan
                 {
                     AutoOrient = encode.AutoOrient,
                     Metadata = encode.Metadata,
                     Quality = encode.Quality,
                     Fallback = encode.AlphaFallbackColor,
-                });
+                };
+                Write(image, destination, format, writePlan, cancellationToken);
                 return size;
             }
             finally
@@ -113,6 +192,14 @@ internal static class ImageEngine
                     owned[i].Dispose();
                 }
             }
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception) when (cancellationToken.IsCancellationRequested)
+        {
+            throw new OperationCanceledException(cancellationToken);
         }
         catch (ImageException)
         {
@@ -133,15 +220,22 @@ internal static class ImageEngine
         ImageAspectRatio? aspect,
         ImageCanvas? canvas,
         AlphaBehavior sourceAlpha,
-        ImageEncode encode)
+        ImageEncode encode,
+        CancellationToken cancellationToken = default)
     {
-        return ExecuteBuilt(source, destination, format, encode, (input, loaderOptions, owned) =>
-        {
-            var image = LoadOriented(input, encode.AutoOrient, loaderOptions, owned);
-            image = ApplySourceAlpha(image, sourceAlpha, owned);
-            image = Turn(image, rotation, bounds, aspect, canvas ?? ImageCanvas.Transparent, owned);
-            return ClearOrientation(image, owned);
-        });
+        return ExecuteBuilt(
+            source,
+            destination,
+            format,
+            encode,
+            (input, loaderOptions, owned) =>
+            {
+                var image = LoadOriented(input, encode.AutoOrient, loaderOptions, owned);
+                image = ApplySourceAlpha(image, sourceAlpha, owned);
+                image = Turn(image, rotation, bounds, aspect, canvas ?? ImageCanvas.Transparent, owned);
+                return ClearOrientation(image, owned);
+            },
+            cancellationToken);
     }
 
     internal static Image LoadOriented(Stream source, bool autoOrient, string? loaderOptions, List<IDisposable> owned)
@@ -239,6 +333,123 @@ internal static class ImageEngine
         return (width, height);
     }
 
+    private static ImageEncode ToEncode(ImageEncoding encoding)
+    {
+        return new ImageEncode
+        {
+            AutoOrient = encoding.AutoOrient,
+            Metadata = encoding.Metadata,
+            Quality = encoding.QualityOrDefault(),
+            AlphaFallbackColor = encoding.AlphaFallbackOrDefault(),
+        };
+    }
+
+    private static ImageSize ExecuteOrdered(
+        Stream source,
+        Stream destination,
+        PipelineOp[] ops,
+        AlphaBehavior sourceAlpha,
+        ImageOutputFormat format,
+        ImageEncode encode,
+        CancellationToken cancellationToken = default)
+    {
+        VipsRuntime.EnsureInitialized();
+
+        try
+        {
+            var owned = new List<IDisposable>();
+            try
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var input = PrepareInput(source, out var loaderOptions);
+                var image = LoadOriented(input, encode.AutoOrient, loaderOptions, owned);
+                var alphaApplied = false;
+                for (var i = 0; i < ops.Length; i++)
+                {
+                    switch (ops[i])
+                    {
+                        case PipelineOp.RotateOp rotate:
+                            if (rotate.Bounds == RotationBounds.Expand && !alphaApplied)
+                            {
+                                image = ApplySourceAlpha(image, sourceAlpha, owned);
+                                alphaApplied = true;
+                            }
+
+                            image = Turn(
+                                image,
+                                rotate.Rotation,
+                                rotate.Bounds,
+                                rotate.Aspect,
+                                rotate.Canvas ?? ImageCanvas.Transparent,
+                                owned);
+                            image = ClearOrientation(image, owned);
+                            break;
+
+                        case PipelineOp.ResizeOp resize:
+                            var plan = new Plan
+                            {
+                                Fit = resize.Fit,
+                                Width = resize.Width,
+                                Height = resize.Height,
+                                Aspect = resize.Aspect,
+                                Enlarge = resize.Enlarge,
+                                Canvas = resize.Canvas,
+                                SourceAlpha = alphaApplied ? AlphaBehavior.Preserve : sourceAlpha,
+                                Focus = resize.Focus,
+                                AutoOrient = false,
+                                Metadata = encode.Metadata,
+                                Quality = encode.Quality,
+                                Fallback = encode.AlphaFallbackColor,
+                            };
+                            image = BuildLoaded(image, plan, owned);
+                            image = Finish(image, plan, owned);
+                            alphaApplied = true;
+                            break;
+                    }
+                }
+
+                if (!alphaApplied)
+                {
+                    image = ApplySourceAlpha(image, sourceAlpha, owned);
+                }
+
+                var size = new ImageSize(image.Width, image.Height);
+                var writePlan = new Plan
+                {
+                    AutoOrient = encode.AutoOrient,
+                    Metadata = encode.Metadata,
+                    Quality = encode.Quality,
+                    Fallback = encode.AlphaFallbackColor,
+                };
+                Write(image, destination, format, writePlan, cancellationToken);
+                return size;
+            }
+            finally
+            {
+                for (var i = owned.Count - 1; i >= 0; i--)
+                {
+                    owned[i].Dispose();
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception) when (cancellationToken.IsCancellationRequested)
+        {
+            throw new OperationCanceledException(cancellationToken);
+        }
+        catch (ImageException)
+        {
+            throw;
+        }
+        catch (Exception ex) when (ex is VipsException or DllNotFoundException or TypeInitializationException)
+        {
+            throw new ImageException("Image transform failed. " + ex.Message, ex);
+        }
+    }
+
     private static Image Build(
         Stream source,
         Plan transform,
@@ -293,6 +504,66 @@ internal static class ImageEngine
         }
     }
 
+    private static Image BuildLoaded(Image image, Plan transform, List<IDisposable> owned)
+    {
+        if (transform.Width is null && transform.Height is null)
+        {
+            if (transform.Aspect is ImageAspectRatio aspect && transform.Fit == ImageFit.Zoom)
+            {
+                return transform.Focus is null
+                    ? NativeZoomLoaded(image, aspect, owned)
+                    : CropToFocusLoaded(image, transform, owned);
+            }
+
+            if (transform.Aspect is not null && transform.Fit != ImageFit.Fit)
+            {
+                throw new ArgumentOutOfRangeException(nameof(transform));
+            }
+
+            return image;
+        }
+
+        switch (transform.Fit)
+        {
+            case ImageFit.Fit:
+                return FitLoaded(
+                    image,
+                    transform.Width ?? UnboundedDimension,
+                    transform.Height ?? UnboundedDimension,
+                    transform.Enlarge ? Enums.Size.Both : Enums.Size.Down,
+                    crop: null,
+                    owned);
+
+            case ImageFit.Stretch:
+                return FitLoaded(
+                    image,
+                    transform.Width!.Value,
+                    transform.Height!.Value,
+                    Enums.Size.Force,
+                    crop: null,
+                    owned);
+
+            case ImageFit.Zoom:
+                if (transform.Focus is not null)
+                {
+                    return CropToFocusLoaded(image, transform, owned);
+                }
+
+                return transform.Enlarge
+                    ? FitLoaded(
+                        image,
+                        transform.Width!.Value,
+                        transform.Height!.Value,
+                        Enums.Size.Both,
+                        Enums.Interesting.Centre,
+                        owned)
+                    : MinLoaded(image, transform, owned);
+
+            default:
+                throw new ArgumentOutOfRangeException(nameof(transform));
+        }
+    }
+
     private static Image Fit(
         Stream source,
         Plan transform,
@@ -331,15 +602,25 @@ internal static class ImageEngine
         List<IDisposable> owned)
     {
         var oriented = LoadOriented(source, transform.AutoOrient, loaderOptions, owned);
+        return NativeZoomLoaded(oriented, aspect, owned);
+    }
+
+    private static Image NativeZoomLoaded(Image oriented, ImageAspectRatio aspect, List<IDisposable> owned)
+    {
         var (cropWidth, cropHeight) = AspectWindow(oriented.Width, oriented.Height, aspect.WidthOverHeight);
         return TakeCenter(oriented, cropWidth, cropHeight, owned);
     }
 
     private static Image Min(Stream source, Plan transform, string? loaderOptions, List<IDisposable> owned)
     {
+        var oriented = LoadOriented(source, transform.AutoOrient, loaderOptions, owned);
+        return MinLoaded(oriented, transform, owned);
+    }
+
+    private static Image MinLoaded(Image oriented, Plan transform, List<IDisposable> owned)
+    {
         var width = transform.Width!.Value;
         var height = transform.Height!.Value;
-        var oriented = LoadOriented(source, transform.AutoOrient, loaderOptions, owned);
         var (cropWidth, cropHeight) = AspectWindow(oriented.Width, oriented.Height, width, height);
         var window = TakeCenter(oriented, cropWidth, cropHeight, owned);
         if (window.Width <= width && window.Height <= height)
@@ -355,6 +636,11 @@ internal static class ImageEngine
     private static Image CropToFocus(Stream source, Plan plan, string? loaderOptions, List<IDisposable> owned)
     {
         var oriented = LoadOriented(source, plan.AutoOrient, loaderOptions, owned);
+        return CropToFocusLoaded(oriented, plan, owned);
+    }
+
+    private static Image CropToFocusLoaded(Image oriented, Plan plan, List<IDisposable> owned)
+    {
         var ratio = plan.Width is int frameWidth && plan.Height is int frameHeight
             ? frameWidth / (double)frameHeight
             : plan.Aspect!.Value.WidthOverHeight;
@@ -577,8 +863,15 @@ internal static class ImageEngine
         return rgba;
     }
 
-    private static void Write(Image image, Stream destination, ImageOutputFormat format, Plan options)
+    private static void Write(
+        Image image,
+        Stream destination,
+        ImageOutputFormat format,
+        Plan options,
+        CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+
         var keep = ToKeep(options.Metadata);
         var working = image;
         Image? flattened = null;
@@ -588,6 +881,12 @@ internal static class ImageEngine
             {
                 flattened = working.Flatten(background: new[] { (double)options.Fallback.R, options.Fallback.G, options.Fallback.B });
                 working = flattened;
+            }
+
+            if (cancellationToken.CanBeCanceled)
+            {
+                // NetVips returns early when progress is null, so a no-op is required to arm kill.
+                working.SetProgress(NoOpProgress.Instance, cancellationToken);
             }
 
             switch (format)

@@ -12,6 +12,7 @@ Targets `net8.0` and `net6.0`. The processing engine is [NetVips](https://github
 
 - [Installation](#installation)
 - [Charter](#charter)
+- [Pipeline](#pipeline)
 - [Operations](#operations)
 - [Fit and canvas](#fit-and-canvas)
 - [Rotation](#rotation)
@@ -54,8 +55,9 @@ This library is that API. It is a thin layer on libvips.
 
 ### What it is
 
-- `ImageTransforms.Resize` and `ImageTransforms.Rotate`, on `Stream` to `Stream`, returning the size written. Fit is the short resize call. `ImageResize` sets the mode, the aspect ratio, the canvas, the focus box, and how source transparency is resolved. `ImageRotate` sets the angle, whether the result expands or trims, and the canvas for new corners.
-- Square `ImageSize` frames from 180 to 2880. `Thumbnail` and `Preview` are `S` and `M`.
+- `ImagePipeline`, a reusable ordered fluent specification that runs from `Stream` to `Stream` (`Run` or `RunAsync`) and returns the size written. Compatible stages share one lazy libvips graph and encode once.
+- Thin shortcuts: `ImageTransforms.Resize` and `ImageTransforms.Rotate` compile into a pipeline. Fit is the short resize call. `ImageResize` / `ImageRotate` remain option bags for those shortcuts.
+- Square `ImageSize` frames from 128 to 4096. `Thumbnail` is `S`. `Preview` is `L`. `ImagePresets` are pipelines built from the same primitives.
 - Visual dimensions by default (`Autorot` before geometry)
 - A small metadata policy: keep, strip, or keep the color profile only
 - A capability check that only reports HEIC when a real HEVC sample decodes
@@ -64,14 +66,51 @@ This library is that API. It is a thin layer on libvips.
 
 - Not face detection, object detection, or a generative fill
 - Not a text, watermark, or blend API
-- Not a filter graph, draw API, or EXIF editor
+- Not a public plugin/stage framework or filter graph
 - Not a cache, HTTP handler, or object-store client
 - Not `System.Drawing` / GDI+
 - Not an HEVC distribution. HEIC shows up only when the host already has a decoder
 
+## Pipeline
+
+Describe operations in order. The chain does not own streams; call `Run` when you have input and output.
+
+```csharp
+var pipeline = ImagePipeline.Create()
+    .Rotate(ImageRotation.Clockwise(12))
+    .Trim()
+    .Resize(ImageSize.M)
+    .Fit(ImageFit.Zoom)
+    .Encoding(ImageEncoding.WebP());
+
+using var source = File.OpenRead(path);
+using var destination = File.Create(outputPath);
+var size = pipeline.Run(source, destination);
+```
+
+`.Resize` sets the frame. `.Fit(ImageFit)` sets the mode (`Fit`, `Zoom`, or `Stretch`). `.Encoding` takes a format-specific object (`ImageEncoding.Jpeg`, `WebP`, `Png`, …) so each format only exposes valid options: JPEG/WebP have quality, JPEG has `AlphaFallbackColor`, PNG has neither. Defaults are JPEG quality 80 and WebP quality 60. Shortcuts such as `.EncodingJpeg()`, `.EncodingWebP()`, and `.EncodingPng()` are available. `.SourceAlpha` is a policy: last call wins, and its place in the chain does not change when it runs. Auto-orient is a default preamble.
+
+Presets are ordinary pipelines:
+
+```csharp
+var thumbnail = ImagePipeline.Preset(ImagePresets.Thumbnail)
+    .SourceAlpha(AlphaBehavior.Preserve);
+
+thumbnail.Run(input1, output1);
+thumbnail.Run(input2, output2);
+```
+
+For ASP.NET request/response bodies (and other streams that require async I/O), use `RunAsync`. Native libvips work stays synchronous on a worker; pipes bridge `ReadAsync` / `WriteAsync`, and the cancellation token kills the native encode:
+
+```csharp
+var size = await pipeline.RunAsync(request.Body, response.Body, cancellationToken);
+```
+
+Prefer sync `Run` when both streams allow synchronous reads and writes.
+
 ## Operations
 
-Output format is an argument because a stream has no filename. Source format is inferred. `Resize` returns the width and height written.
+Output format is an argument because a stream has no filename. Source format is inferred. Shortcuts return the width and height written.
 
 ```csharp
 using var source = File.OpenRead(path);
@@ -149,7 +188,7 @@ ImageTransforms.Rotate(source, destination, new ImageRotate(ImageOutputFormat.Pn
 
 `Clockwise` and `CounterClockwise` take a non-negative number of degrees. `Clockwise(90)`, `Clockwise(180)`, and `Clockwise(270)` are exact quarter turns and do not resample. Any other angle does.
 
-`Bounds` defaults to `Expand`: the smallest axis-aligned rectangle that contains the rotated image. Corners that rectangle adds use `Canvas`, which defaults to transparent. JPEG cannot store that alpha, so `AlphaFallbackColor` flattens the corners, white unless you change it. A multiple of 90 degrees adds no corners.
+`Bounds` defaults to `Expand`: the smallest axis-aligned rectangle that contains the rotated image. Corners that rectangle adds use `Canvas`, which defaults to transparent. JPEG cannot store that alpha, so `ImageEncoding.Jpeg`’s `AlphaFallbackColor` flattens the corners, white unless you change it. A multiple of 90 degrees adds no corners.
 
 `RotationBounds.Trim` keeps the largest centered axis-aligned rectangle that stays inside the rotated image. `Aspect` on a trim is that same rectangle at the requested ratio, still centered. It is not a second resize. An aspect ratio applies with `Trim`. A canvas applies with `Expand`.
 
@@ -161,7 +200,7 @@ ImageTransforms.Rotate(source, destination, new ImageRotate(ImageOutputFormat.Pn
 
 The canvas stays separate. A transparent canvas can surround a checkerboard, and a black canvas can show through preserved source transparency.
 
-`AlphaFallbackColor` runs last, and only when the output cannot store alpha. JPEG flattens whatever remains onto that color, which defaults to white.
+`AlphaFallbackColor` on JPEG encoding runs last, and only when the output cannot store alpha. JPEG flattens whatever remains onto that color, which defaults to white.
 
 ## Target
 
@@ -183,13 +222,14 @@ Named ratios are `Square`, `FourByThree`, `ThreeByFour`, `SixteenByNine`, and `N
 
 | Size | Frame |
 | --- | --- |
-| `XS` | 180 × 180 |
-| `S`, `Thumbnail` | 360 × 360 |
-| `M`, `Preview` | 720 × 720 |
-| `L` | 1440 × 1440 |
-| `XL` | 2880 × 2880 |
+| `XS` | 128 × 128 |
+| `S`, `Thumbnail` | 256 × 256 |
+| `M` | 512 × 512 |
+| `L`, `Preview` | 1024 × 1024 |
+| `XL` | 2048 × 2048 |
+| `XXL` | 4096 × 4096 |
 
-`Thumbnail` is `S`. `Preview` is `M`. Any other frame is `new ImageSize(width, height)`. A named size is only the frame. It does not change the fit, the canvas, or the metadata policy.
+`Thumbnail` is `S`. `Preview` is `L`. Any other frame is `new ImageSize(width, height)`. A named size is only the frame. It does not change the fit, the canvas, or the metadata policy.
 
 ```csharp
 var size = ImageTransforms.Resize(source, destination, ImageOutputFormat.Jpeg, ImageSize.Preview);
@@ -217,12 +257,12 @@ ImageTransforms.Resize(source, destination, new ImageResize(ImageOutputFormat.We
 | --- | --- | --- |
 | `AutoOrient` | `true` | Apply orientation metadata before measuring and resizing. |
 | `Metadata` | `PreserveColorProfileOnly` | See below. |
-| `Quality` | `85` | JPEG, WebP, AVIF, and HEIC. Range 1-100. PNG is lossless and ignores it. |
-| `AlphaFallbackColor` | white | Used when the output format cannot store remaining alpha. JPEG flattens onto it. |
+| `Quality` | see notes | `ImageEncoding.Jpeg` defaults to 80, `WebP` to 60, AVIF/HEIC to 85. Range 1-100. PNG has no quality. |
+| `AlphaFallbackColor` | white | On JPEG encoding only. Used when remaining alpha cannot be stored. |
 
 Pass `encode` only when a default should change.
 
-There is no `TransformAsync`. libvips reads and writes on the calling thread even when the stream is a network stream. A `Task.Run` wrapper would only look asynchronous.
+`ImageTransforms.Resize` / `Rotate` compile into `ImagePipeline` and call `Run`. Prefer the pipeline when order matters (for example rotate, then resize) so stages share one native graph.
 
 ## Orientation
 
@@ -261,10 +301,12 @@ Animated GIF and multi-page TIFF are reduced to the first frame on purpose. HEIF
 ## Streaming
 
 ```text
-source stream -> decode -> auto-orient -> resize / crop / pad -> encode -> destination stream
+source stream -> decode -> auto-orient -> ordered stages -> encode -> destination stream
 ```
 
 Callers never have to copy the compressed input or the encoded output into a `byte[]`. The work stays in libvips. Thumbnail generation uses `thumbnail_source`, which can shrink JPEG and similar formats while decoding.
+
+`RunAsync` adds pipes on both ends so async-only streams (ASP.NET bodies) never see sync `Read` / `Write`. The native graph still runs synchronously on a worker thread.
 
 Some inputs are not streamed end to end. A center zoom that does not enlarge, and a zoom with a focus box, decode the oriented image once and then extract. Orientation and some codecs also cause libvips to buffer. The guarantee is only that the API does not force that buffer into managed arrays.
 

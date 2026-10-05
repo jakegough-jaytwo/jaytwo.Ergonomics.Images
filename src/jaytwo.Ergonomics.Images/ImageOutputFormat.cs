@@ -9,7 +9,7 @@ namespace jaytwo.Ergonomics.Images;
 /// </remarks>
 public enum ImageOutputFormat
 {
-    /// <summary>JPEG. Remaining alpha is flattened onto <see cref="ImageEncode.AlphaFallbackColor"/>.</summary>
+    /// <summary>JPEG. Remaining alpha is flattened onto <see cref="ImageEncoding.JpegEncoding.AlphaFallbackColor"/>.</summary>
     Jpeg,
 
     /// <summary>PNG.</summary>

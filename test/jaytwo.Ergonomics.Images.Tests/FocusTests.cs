@@ -164,9 +164,9 @@ public class FocusTests
         }));
 
         using var image = DecodedImage.Open(output);
-        Assert.Equal(360, image.Width);
-        Assert.Equal(360, image.Height);
-        image.Near(20, 180, 220, 20, 20);
-        image.Near(340, 180, 220, 20, 20);
+        Assert.Equal(256, image.Width);
+        Assert.Equal(256, image.Height);
+        image.Near(20, 128, 220, 20, 20);
+        image.Near(236, 128, 220, 20, 20);
     }
 }
