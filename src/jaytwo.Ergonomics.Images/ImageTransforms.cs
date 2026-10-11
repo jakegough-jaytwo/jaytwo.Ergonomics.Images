@@ -53,55 +53,68 @@ public static class ImageTransforms
     }
 
     /// <summary>
-    /// Fits the image inside the requested size and keeps the aspect ratio.
+    /// Reads structural header fields and metadata bags from <paramref name="source"/> without encoding.
+    /// </summary>
+    /// <remarks>
+    /// Opens the image header only (no pixel decode for typical formats). Does not auto-orient;
+    /// see <see cref="ImageStructure.VisualSize"/> for the size after an orientation swap.
+    /// This is read-only: it does not edit EXIF, XMP, or IPTC.
+    /// </remarks>
+    /// <returns>Layered <see cref="ImageMetadata"/> for the source stream.</returns>
+    public static ImageMetadata Identify(Stream source)
+    {
+        return ImageEngine.Identify(source);
+    }
+
+    /// <summary>
+    /// Pads the image inside the requested size and keeps the aspect ratio (<see cref="ResizeMode.Pad"/>).
     /// </summary>
     /// <remarks>
     /// Omit <paramref name="width"/> and <paramref name="height"/> to keep the source size.
     /// Pass one side to derive the other from the aspect ratio. When both are set, the result
-    /// fits inside the box and one side can be shorter. The whole image stays visible.
-    /// <paramref name="enlarge"/> false leaves a source smaller than the box at its own size.
-    /// A fit, a canvas, or an aspect ratio belongs on <see cref="ImageResize"/> or <see cref="ImagePipeline"/>.
+    /// scales inside the box and one side can be shorter. The whole image stays visible.
+    /// <paramref name="enlarge"/> false (the default) leaves a source smaller than the box at its own size.
+    /// Pass <paramref name="enlarge"/> true to allow upscaling.
+    /// Crop, distort, a canvas, or an aspect ratio belongs on <see cref="ImageResize"/> or <see cref="ImagePipeline"/>.
     /// </remarks>
     /// <returns>The width and height written.</returns>
     public static ImageSize Resize(
         Stream source,
         Stream destination,
-        ImageOutputFormat format,
+        ImageEncoding encoding,
         int? width = null,
         int? height = null,
-        bool enlarge = true,
-        ImageEncode? encode = null)
+        bool enlarge = false)
     {
-        return Resize(source, destination, new ImageResize(format)
+        return Resize(source, destination, new ImageResize(encoding)
         {
             Width = width,
             Height = height,
             Enlarge = enlarge,
-            Encode = encode,
         });
     }
 
     /// <summary>
-    /// Fits the image inside <paramref name="size"/> and keeps the aspect ratio.
+    /// Pads the image inside <paramref name="size"/> and keeps the aspect ratio (<see cref="ResizeMode.Pad"/>).
     /// </summary>
     /// <remarks>
     /// One side of the result can be shorter. The whole image stays visible.
-    /// <paramref name="enlarge"/> false leaves a source smaller than the frame at its own size.
+    /// <paramref name="enlarge"/> false (the default) leaves a source smaller than the frame at its own size.
+    /// Pass <paramref name="enlarge"/> true to allow upscaling.
     /// </remarks>
     /// <returns>The width and height written.</returns>
     public static ImageSize Resize(
         Stream source,
         Stream destination,
-        ImageOutputFormat format,
+        ImageEncoding encoding,
         ImageSize size,
-        bool enlarge = true,
-        ImageEncode? encode = null)
+        bool enlarge = false)
     {
-        return Resize(source, destination, format, size.Width, size.Height, enlarge, encode);
+        return Resize(source, destination, encoding, size.Width, size.Height, enlarge);
     }
 
     /// <summary>
-    /// Resizes with the fit, frame, and canvas on <paramref name="resize"/>.
+    /// Resizes with the mode, frame, and canvas on <paramref name="resize"/>.
     /// </summary>
     /// <returns>The width and height written.</returns>
     public static ImageSize Resize(Stream source, Stream destination, ImageResize resize)
@@ -118,7 +131,7 @@ public static class ImageTransforms
     /// Rotates the upright image and writes it to <paramref name="destination"/>.
     /// </summary>
     /// <remarks>
-    /// Auto-orient runs first unless <see cref="ImageEncode.AutoOrient"/> is false.
+    /// Auto-orient runs first unless <see cref="ImageRotate.AutoOrient"/> is false.
     /// <paramref name="rotate"/> is then applied to that raster. The output orientation tag is cleared,
     /// so a viewer does not rotate the result again.
     /// A multiple of 90 degrees does not resample. Any other angle does.
@@ -134,46 +147,55 @@ public static class ImageTransforms
         return ImagePipeline.FromRotate(rotate).Run(source, destination);
     }
 
-    internal static ImageEncode Settings(ImageEncode? encode, string paramName)
+    /// <summary>
+    /// Crops a relative rectangle from the upright image and writes it to <paramref name="destination"/>.
+    /// </summary>
+    /// <remarks>
+    /// Auto-orient runs first unless <see cref="ImageCrop.AutoOrient"/> is false.
+    /// Coordinates match <see cref="ImageFocus"/>: fractions from 0 to 1, origin at the top left.
+    /// The box must stay inside the image and have positive area.
+    /// </remarks>
+    /// <returns>The width and height written.</returns>
+    public static ImageSize Crop(Stream source, Stream destination, ImageCrop crop)
     {
-        var settings = encode ?? new ImageEncode();
-        if (!Enum.IsDefined(typeof(MetadataPolicy), settings.Metadata))
+        if (crop is null)
         {
-            throw new ArgumentOutOfRangeException(paramName, "Metadata policy is not a known value.");
+            throw new ArgumentNullException(nameof(crop));
         }
 
-        if (settings.Quality is < 1 or > 100)
-        {
-            throw new ArgumentOutOfRangeException(paramName, "Quality must be from 1 to 100.");
-        }
-
-        return settings;
+        return ImagePipeline.FromCrop(crop).Run(source, destination);
     }
 
-    internal static Frame Resolve(ImageResize resize)
+    internal static Frame Resolve(ImageResize resize) => Resolve(resize.Width, resize.Height, resize.Aspect);
+
+    /// <summary>
+    /// Resolves a pixel box and optional aspect into the frame the engine should use.
+    /// Both sides plus an aspect become the largest rectangle of that ratio inside the box.
+    /// </summary>
+    internal static Frame Resolve(int? width, int? height, ImageAspectRatio? aspect)
     {
-        if (resize.Aspect is not ImageAspectRatio aspect)
+        if (aspect is not ImageAspectRatio ratio)
         {
-            return new Frame(resize.Width, resize.Height, null);
+            return new Frame(width, height, null);
         }
 
-        if (resize.Width is int width && resize.Height is int height)
+        if (width is int boxWidth && height is int boxHeight)
         {
-            var fitted = FitInside(width, height, aspect);
+            var fitted = FitInside(boxWidth, boxHeight, ratio);
             return new Frame(fitted.Width, fitted.Height, null);
         }
 
-        if (resize.Width is int onlyWidth)
+        if (width is int onlyWidth)
         {
-            return new Frame(onlyWidth, Scale(onlyWidth, 1d / aspect.WidthOverHeight), null);
+            return new Frame(onlyWidth, Scale(onlyWidth, 1d / ratio.WidthOverHeight), null);
         }
 
-        if (resize.Height is int onlyHeight)
+        if (height is int onlyHeight)
         {
-            return new Frame(Scale(onlyHeight, aspect.WidthOverHeight), onlyHeight, null);
+            return new Frame(Scale(onlyHeight, ratio.WidthOverHeight), onlyHeight, null);
         }
 
-        return new Frame(null, null, aspect);
+        return new Frame(null, null, ratio);
     }
 
     private static (int Width, int Height) FitInside(int boxWidth, int boxHeight, ImageAspectRatio aspect)

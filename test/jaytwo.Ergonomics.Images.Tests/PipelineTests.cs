@@ -12,7 +12,6 @@ public class PipelineTests
         var pipeline = ImagePipeline.Create()
             .Rotate(ImageRotation.Clockwise(90))
             .Resize(40, 40)
-            .Fit(ImageFit.Fit)
             .EncodingPng();
 
         var output = Transform.Png(SampleImages.HorizontalHalves(80, 40), (source, destination) =>
@@ -30,7 +29,6 @@ public class PipelineTests
     {
         var pipeline = ImagePipeline.Create()
             .Resize(ImageSize.S)
-            .Fit(ImageFit.Fit)
             .EncodingPng();
 
         using var source1 = new MemoryStream(SampleImages.SolidJpeg(400, 200, 30, 140, 60));
@@ -49,7 +47,7 @@ public class PipelineTests
     public void Thumbnail_preset_fits_inside_256()
     {
         var output = Transform.Png(SampleImages.SolidJpeg(400, 200, 30, 140, 60), (source, destination) =>
-            ImagePipeline.Preset(ImagePresets.Thumbnail)
+            ImagePipeline.Preset(ImagePresets.ThumbnailWebP)
                 .EncodingPng()
                 .Run(source, destination));
 
@@ -59,11 +57,10 @@ public class PipelineTests
     }
 
     [Fact]
-    public void Fit_mode_is_set_with_Fit_not_Resize()
+    public void Resize_accepts_mode()
     {
         var pipeline = ImagePipeline.Create()
-            .Resize(100, 100)
-            .Fit(ImageFit.Zoom)
+            .Resize(100, 100, ResizeMode.Crop)
             .EncodingPng();
 
         var output = Transform.Png(SampleImages.SolidJpeg(400, 200, 30, 140, 60), (source, destination) =>
@@ -91,11 +88,30 @@ public class PipelineTests
     }
 
     [Fact]
-    public void Encoding_defaults_are_jpeg_80_and_webp_60()
+    public void Encoding_defaults_use_format_quality_constants()
     {
-        Assert.Equal(80, ImageEncoding.Jpeg().Quality);
-        Assert.Equal(60, ImageEncoding.WebP().Quality);
+        Assert.Equal(ImageEncoding.DefaultJpegQuality, ImageEncoding.Jpeg().Quality);
+        Assert.Equal(WebPCompression.Lossy(), ImageEncoding.WebP().Compression);
+        Assert.Equal(WebPCompression.Lossless, ImageEncoding.WebP(WebPCompression.Lossless).Compression);
+        Assert.Equal(ImageEncoding.DefaultAvifQuality, ImageEncoding.Avif().Quality);
+        Assert.Equal(ImageEncoding.DefaultHeicQuality, ImageEncoding.Heic().Quality);
         Assert.Equal(ImageColor.White, ImageEncoding.Jpeg().AlphaFallbackColor);
+    }
+
+    [Fact]
+    public void EncodingWebP_lossless_encodes()
+    {
+        var pipeline = ImagePipeline.Create()
+            .Resize(40, 40)
+            .EncodingWebP(WebPCompression.Lossless);
+
+        var output = Transform.Run(SampleImages.SolidJpeg(80, 40, 30, 140, 60), (source, destination) =>
+            pipeline.Run(source, destination));
+
+        Assert.Equal((byte)'R', output[0]);
+        using var image = DecodedImage.Open(output);
+        Assert.Equal(40, image.Width);
+        Assert.Equal(20, image.Height);
     }
 
     [Fact]
@@ -115,9 +131,25 @@ public class PipelineTests
     [Fact]
     public void EncodingPng_has_no_quality_argument()
     {
-        var encoding = ImageEncoding.Png() with { AutoOrient = false };
+        var encoding = ImageEncoding.Png() with { Metadata = MetadataPolicy.Strip };
         Assert.Equal(ImageOutputFormat.Png, encoding.Format);
-        Assert.False(encoding.AutoOrient);
+        Assert.Equal(MetadataPolicy.Strip, encoding.Metadata);
+    }
+
+    [Fact]
+    public void Create_can_disable_auto_orient()
+    {
+        var pipeline = ImagePipeline.Create(s => s.AutoOrient(false))
+            .Encoding(ImageEncoding.Jpeg(95) with { Metadata = MetadataPolicy.Preserve });
+
+        var output = Transform.Run(
+            SampleImages.HorizontalHalves(80, 40, orientation: 6),
+            (source, destination) => pipeline.Run(source, destination));
+
+        using var image = DecodedImage.Open(output);
+        Assert.Equal(80, image.Width);
+        Assert.Equal(40, image.Height);
+        Assert.Equal(6, image.Orientation());
     }
 
     [Fact]
@@ -130,8 +162,17 @@ public class PipelineTests
     }
 
     [Fact]
-    public void Trim_needs_a_preceding_rotate()
+    public void Rotate_trim_is_configured_on_the_stage()
     {
-        Assert.Throws<InvalidOperationException>(() => ImagePipeline.Create().Trim());
+        var pipeline = ImagePipeline.Create()
+            .Rotate(ImageRotation.Clockwise(12), r => r.Trim())
+            .EncodingPng();
+
+        var output = Transform.Png(SampleImages.SolidJpeg(200, 200, 30, 140, 60), (source, destination) =>
+            pipeline.Run(source, destination));
+
+        using var image = DecodedImage.Open(output);
+        Assert.True(image.Width > 0);
+        Assert.True(image.Height > 0);
     }
 }

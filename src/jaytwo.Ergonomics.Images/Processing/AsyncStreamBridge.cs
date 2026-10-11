@@ -16,6 +16,7 @@ internal static class AsyncStreamBridge
         Stream destination,
         PipelineOp[] ops,
         AlphaBehavior sourceAlpha,
+        bool autoOrient,
         ImageEncoding encoding,
         CancellationToken cancellationToken)
     {
@@ -32,6 +33,7 @@ internal static class AsyncStreamBridge
                 outputPipe,
                 ops,
                 sourceAlpha,
+                autoOrient,
                 encoding,
                 cancellationToken),
             CancellationToken.None);
@@ -59,6 +61,7 @@ internal static class AsyncStreamBridge
         Pipe outputPipe,
         PipelineOp[] ops,
         AlphaBehavior sourceAlpha,
+        bool autoOrient,
         ImageEncoding encoding,
         CancellationToken cancellationToken)
     {
@@ -71,6 +74,7 @@ internal static class AsyncStreamBridge
                 outputStream,
                 ops,
                 sourceAlpha,
+                autoOrient,
                 encoding,
                 cancellationToken);
             inputPipe.Reader.Complete();

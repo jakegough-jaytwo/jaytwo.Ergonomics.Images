@@ -41,10 +41,10 @@ public class AspectRatioTests
     [Fact]
     public void Zoom_to_square_keeps_the_center_at_the_source_size()
     {
-        var output = Transform.Png(SampleImages.HorizontalHalves(400, 200), (source, destination) => ImageTransforms.Resize(source, destination, new ImageResize(ImageOutputFormat.Png)
+        var output = Transform.Png(SampleImages.HorizontalHalves(400, 200), (source, destination) => ImageTransforms.Resize(source, destination, new ImageResize(ImageEncoding.Png())
         {
             Aspect = ImageAspectRatio.Square,
-            Fit = ImageFit.Zoom,
+            Mode = ResizeMode.Crop,
         }));
 
         using var image = DecodedImage.Open(output);
@@ -57,7 +57,7 @@ public class AspectRatioTests
     [Fact]
     public void Fit_pads_to_square_at_the_source_size()
     {
-        var output = Transform.Png(SampleImages.SolidJpeg(400, 200, 30, 140, 60), (source, destination) => ImageTransforms.Resize(source, destination, new ImageResize(ImageOutputFormat.Png)
+        var output = Transform.Png(SampleImages.SolidJpeg(400, 200, 30, 140, 60), (source, destination) => ImageTransforms.Resize(source, destination, new ImageResize(ImageEncoding.Png())
         {
             Aspect = ImageAspectRatio.Square,
             Canvas = ImageCanvas.SolidWhite,
@@ -73,11 +73,11 @@ public class AspectRatioTests
     [Fact]
     public void One_side_and_an_aspect_ratio_calculate_the_other_side()
     {
-        var output = Transform.Png(SampleImages.SolidJpeg(400, 400, 30, 140, 60), (source, destination) => ImageTransforms.Resize(source, destination, new ImageResize(ImageOutputFormat.Png)
+        var output = Transform.Png(SampleImages.SolidJpeg(400, 400, 30, 140, 60), (source, destination) => ImageTransforms.Resize(source, destination, new ImageResize(ImageEncoding.Png())
         {
             Width = 160,
             Aspect = ImageAspectRatio.SixteenByNine,
-            Fit = ImageFit.Zoom,
+            Mode = ResizeMode.Crop,
         }));
 
         using var image = DecodedImage.Open(output);
@@ -88,7 +88,7 @@ public class AspectRatioTests
     [Fact]
     public void Both_sides_and_an_aspect_ratio_fit_the_ratio_inside_the_box()
     {
-        var output = Transform.Png(SampleImages.SolidJpeg(800, 200, 30, 140, 60), (source, destination) => ImageTransforms.Resize(source, destination, new ImageResize(ImageOutputFormat.Png)
+        var output = Transform.Png(SampleImages.SolidJpeg(800, 200, 30, 140, 60), (source, destination) => ImageTransforms.Resize(source, destination, new ImageResize(ImageEncoding.Png())
         {
             Width = 400,
             Height = 300,
@@ -104,12 +104,60 @@ public class AspectRatioTests
     }
 
     [Fact]
+    public void Fluent_both_sides_and_aspect_match_the_bag()
+    {
+        var pipeline = ImagePipeline.Create()
+            .Resize(400, 300, r => r.Aspect(ImageAspectRatio.Square).Canvas(ImageCanvas.SolidWhite))
+            .EncodingPng();
+
+        var output = Transform.Png(SampleImages.SolidJpeg(800, 200, 30, 140, 60), (source, destination) =>
+            pipeline.Run(source, destination));
+
+        using var image = DecodedImage.Open(output);
+        Assert.Equal(300, image.Width);
+        Assert.Equal(300, image.Height);
+        image.Near(150, 2, 255, 255, 255);
+        image.Near(150, 150, 30, 140, 60);
+    }
+
+    [Fact]
+    public void Fluent_one_side_and_aspect_calculate_the_other_side()
+    {
+        var pipeline = ImagePipeline.Create()
+            .Resize(width: 160, mode: ResizeMode.Crop, configure: r => r
+                .Aspect(ImageAspectRatio.SixteenByNine)
+                .Enlarge(true))
+            .EncodingPng();
+
+        var output = Transform.Png(SampleImages.SolidJpeg(400, 400, 30, 140, 60), (source, destination) =>
+            pipeline.Run(source, destination));
+
+        using var image = DecodedImage.Open(output);
+        Assert.Equal(160, image.Width);
+        Assert.Equal(90, image.Height);
+    }
+
+    [Fact]
+    public void Fluent_aspect_after_trim_sets_the_trim_ratio()
+    {
+        var pipeline = ImagePipeline.Create()
+            .Rotate(ImageRotation.Clockwise(12), r => r.Trim(ImageAspectRatio.FourByThree))
+            .EncodingPng();
+
+        var output = Transform.Png(SampleImages.SolidJpeg(200, 200, 30, 140, 60), (source, destination) =>
+            pipeline.Run(source, destination));
+
+        using var image = DecodedImage.Open(output);
+        Assert.InRange(image.Width / (double)image.Height, (4d / 3d) - 0.05, (4d / 3d) + 0.05);
+    }
+
+    [Fact]
     public void Zoom_to_sixteen_by_nine_discards_overflow_at_the_source_size()
     {
-        var output = Transform.Png(SampleImages.SolidJpeg(300, 300, 30, 140, 60), (source, destination) => ImageTransforms.Resize(source, destination, new ImageResize(ImageOutputFormat.Png)
+        var output = Transform.Png(SampleImages.SolidJpeg(300, 300, 30, 140, 60), (source, destination) => ImageTransforms.Resize(source, destination, new ImageResize(ImageEncoding.Png())
         {
             Aspect = ImageAspectRatio.SixteenByNine,
-            Fit = ImageFit.Zoom,
+            Mode = ResizeMode.Crop,
         }));
 
         using var image = DecodedImage.Open(output);

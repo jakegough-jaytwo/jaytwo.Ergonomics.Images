@@ -12,15 +12,10 @@ public class MetadataTests
             (source, destination) => ImageTransforms.Resize(
                 source,
                 destination,
-                ImageOutputFormat.Jpeg,
+                ImageEncoding.Jpeg(95) with { Metadata = MetadataPolicy.Preserve },
                 200,
                 200,
-                enlarge: false,
-                encode: new ImageEncode
-                {
-                    Quality = 95,
-                    Metadata = MetadataPolicy.Preserve,
-                }));
+                enlarge: false));
 
         using var image = DecodedImage.Open(output);
         Assert.Equal(40, image.Width);
@@ -39,15 +34,10 @@ public class MetadataTests
             (source, destination) => ImageTransforms.Resize(
                 source,
                 destination,
-                ImageOutputFormat.Jpeg,
+                ImageEncoding.Jpeg(95) with { Metadata = MetadataPolicy.Strip },
                 200,
                 200,
-                enlarge: false,
-                encode: new ImageEncode
-                {
-                    Quality = 95,
-                    Metadata = MetadataPolicy.Strip,
-                }));
+                enlarge: false));
 
         using var image = DecodedImage.Open(output);
         Assert.Equal(40, image.Width);
@@ -64,15 +54,10 @@ public class MetadataTests
             (source, destination) => ImageTransforms.Resize(
                 source,
                 destination,
-                ImageOutputFormat.Jpeg,
+                ImageEncoding.Jpeg(95) with { Metadata = MetadataPolicy.PreserveColorProfileOnly },
                 40,
                 20,
-                enlarge: false,
-                encode: new ImageEncode
-                {
-                    Quality = 95,
-                    Metadata = MetadataPolicy.PreserveColorProfileOnly,
-                }));
+                enlarge: false));
 
         using var image = DecodedImage.Open(output);
         Assert.Null(image.ExifMake());

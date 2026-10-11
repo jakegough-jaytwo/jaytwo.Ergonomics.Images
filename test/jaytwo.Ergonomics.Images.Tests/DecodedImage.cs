@@ -107,6 +107,22 @@ internal sealed class DecodedImage : IDisposable
         Assert.InRange(pixel[pixel.Length - 1], alpha - tolerance, alpha + tolerance);
     }
 
+    /// <summary>
+    /// Fails when an opaque pixel is near black. Transparent residuals are allowed.
+    /// </summary>
+    public void RejectOpaqueBlack(int x, int y, int blackMax = 24, byte minAlpha = 200)
+    {
+        var pixel = _image.Getpoint(x, y);
+        if (_image.HasAlpha() && pixel[pixel.Length - 1] < minAlpha)
+        {
+            return;
+        }
+
+        Assert.False(
+            pixel[0] <= blackMax && pixel[1] <= blackMax && pixel[2] <= blackMax,
+            $"Opaque black at ({x},{y}).");
+    }
+
     private static string UnwrapExif(string value)
     {
         // libvips appends " (value, ASCII, N components, N bytes)" so EXIF strings can round-trip.

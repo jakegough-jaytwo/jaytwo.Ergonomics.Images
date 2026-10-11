@@ -13,7 +13,6 @@ public class RunAsyncTests
     {
         var pipeline = ImagePipeline.Create()
             .Resize(40, 40)
-            .Fit(ImageFit.Fit)
             .EncodingPng();
 
         var sourceBytes = SampleImages.SolidJpeg(80, 40, 30, 140, 60);
@@ -35,7 +34,6 @@ public class RunAsyncTests
     {
         var pipeline = ImagePipeline.Create()
             .Resize(800, 800)
-            .Fit(ImageFit.Fit)
             .EncodingPng();
 
         var sourceBytes = SampleImages.SolidJpeg(1600, 1200, 30, 140, 60);

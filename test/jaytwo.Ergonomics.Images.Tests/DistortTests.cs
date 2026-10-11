@@ -2,16 +2,16 @@ using Xunit;
 
 namespace jaytwo.Ergonomics.Images.Tests;
 
-public class FitScaleTests
+public class DistortTests
 {
     [Fact]
     public void Stretch_forces_exact_dimensions()
     {
-        var output = Transform.Png(SampleImages.SolidJpeg(400, 200, 30, 140, 60), (source, destination) => ImageTransforms.Resize(source, destination, new ImageResize(ImageOutputFormat.Png)
+        var output = Transform.Png(SampleImages.SolidJpeg(400, 200, 30, 140, 60), (source, destination) => ImageTransforms.Resize(source, destination, new ImageResize(ImageEncoding.Png())
         {
             Width = 50,
             Height = 80,
-            Fit = ImageFit.Stretch,
+            Mode = ResizeMode.Distort,
         }));
 
         using var image = DecodedImage.Open(output);
@@ -22,11 +22,11 @@ public class FitScaleTests
     [Fact]
     public void Stretch_upscales_to_the_box()
     {
-        var output = Transform.Png(SampleImages.SolidJpeg(20, 10, 30, 140, 60), (source, destination) => ImageTransforms.Resize(source, destination, new ImageResize(ImageOutputFormat.Png)
+        var output = Transform.Png(SampleImages.SolidJpeg(20, 10, 30, 140, 60), (source, destination) => ImageTransforms.Resize(source, destination, new ImageResize(ImageEncoding.Png())
         {
             Width = 40,
             Height = 30,
-            Fit = ImageFit.Stretch,
+            Mode = ResizeMode.Distort,
         }));
 
         using var image = DecodedImage.Open(output);

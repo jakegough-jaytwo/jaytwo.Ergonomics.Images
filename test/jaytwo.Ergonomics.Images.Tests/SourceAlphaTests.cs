@@ -1,3 +1,4 @@
+using System;
 using Xunit;
 
 namespace jaytwo.Ergonomics.Images.Tests;
@@ -5,12 +6,37 @@ namespace jaytwo.Ergonomics.Images.Tests;
 public class SourceAlphaTests
 {
     [Fact]
+    public void Create_configure_flattens_source_alpha_before_geometry()
+    {
+        var pipeline = ImagePipeline.Create(s => s.SourceAlpha(AlphaBehavior.Flatten(ImageColor.White)))
+            .Resize(80, 80, r => r.Canvas(ImageCanvas.Transparent))
+            .EncodingPng();
+
+        var output = Transform.Png(SampleImages.AlphaHalvesPng(80, 40), (source, destination) =>
+            pipeline.Run(source, destination));
+
+        using var image = DecodedImage.Open(output);
+        image.AlphaNear(40, 4, 0);
+        image.Near(16, 40, 20, 180, 40, tolerance: 2);
+        image.AlphaNear(16, 40, 255);
+        image.Near(60, 40, 255, 255, 255, tolerance: 2);
+        image.AlphaNear(60, 40, 255);
+    }
+
+    [Fact]
+    public void Create_source_alpha_rejects_null()
+    {
+        Assert.Throws<ArgumentNullException>(() =>
+            ImagePipeline.Create(s => s.SourceAlpha(null!)));
+    }
+
+    [Fact]
     public void Preserve_keeps_source_alpha_and_a_transparent_canvas()
     {
         var output = Transform.Png(SampleImages.AlphaHalvesPng(80, 40), (source, destination) => ImageTransforms.Resize(
             source,
             destination,
-            new ImageResize(ImageOutputFormat.Png)
+            new ImageResize(ImageEncoding.Png())
             {
                 Width = 80,
                 Height = 80,
@@ -33,7 +59,7 @@ public class SourceAlphaTests
         var output = Transform.Png(SampleImages.AlphaHalvesPng(80, 40), (source, destination) => ImageTransforms.Resize(
             source,
             destination,
-            new ImageResize(ImageOutputFormat.Png)
+            new ImageResize(ImageEncoding.Png())
             {
                 Width = 80,
                 Height = 80,
@@ -50,24 +76,25 @@ public class SourceAlphaTests
     }
 
     [Fact]
-    public void Checkerboard_fills_source_transparency_and_leaves_the_canvas_transparent()
+    public void Checkerboard_canvas_fills_gaps_and_content_alpha()
     {
         var output = Transform.Png(SampleImages.AlphaHalvesPng(80, 40), (source, destination) => ImageTransforms.Resize(
             source,
             destination,
-            new ImageResize(ImageOutputFormat.Png)
+            new ImageResize(ImageEncoding.Png())
             {
                 Width = 80,
                 Height = 80,
-                Canvas = ImageCanvas.Transparent,
-                SourceAlpha = AlphaBehavior.Checkerboard(),
+                Canvas = ImageCanvas.Checkerboard,
+                SourceAlpha = AlphaBehavior.Preserve,
             }));
 
         using var image = DecodedImage.Open(output);
-        image.AlphaNear(40, 4, 0);
+        image.Near(40, 4, 204, 204, 204, tolerance: 2);
+        image.AlphaNear(40, 4, 255);
         image.Near(16, 40, 20, 180, 40, tolerance: 2);
-        image.Near(44, 24, 204, 204, 204, tolerance: 2);
-        image.AlphaNear(44, 24, 255);
+        image.Near(60, 40, 255, 255, 255, tolerance: 2);
+        image.AlphaNear(60, 40, 255);
     }
 
     [Fact]
@@ -78,17 +105,12 @@ public class SourceAlphaTests
             (source, destination) => ImageTransforms.Resize(
                 source,
                 destination,
-                new ImageResize(ImageOutputFormat.Jpeg)
+                new ImageResize(ImageEncoding.Jpeg(95, ImageColor.White))
                 {
                     Width = 80,
                     Height = 80,
                     Canvas = ImageCanvas.Transparent,
                     SourceAlpha = AlphaBehavior.Preserve,
-                    Encode = new ImageEncode
-                    {
-                        AlphaFallbackColor = ImageColor.White,
-                        Quality = 95,
-                    },
                 }));
 
         using var image = DecodedImage.Open(output);
@@ -106,17 +128,12 @@ public class SourceAlphaTests
             (source, destination) => ImageTransforms.Resize(
                 source,
                 destination,
-                new ImageResize(ImageOutputFormat.Jpeg)
+                new ImageResize(ImageEncoding.Jpeg(95, ImageColor.White))
                 {
                     Width = 80,
                     Height = 80,
                     Canvas = ImageCanvas.SolidBlack,
                     SourceAlpha = AlphaBehavior.Preserve,
-                    Encode = new ImageEncode
-                    {
-                        AlphaFallbackColor = ImageColor.White,
-                        Quality = 95,
-                    },
                 }));
 
         using var image = DecodedImage.Open(output);

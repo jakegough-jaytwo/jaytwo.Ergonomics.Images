@@ -13,7 +13,7 @@ public class StreamTests
         using var source = new NonSeekableStream(new MemoryStream(sourceBytes));
         using var backing = new MemoryStream();
         using var destination = new NonSeekableStream(backing);
-        ImageTransforms.Resize(source, destination, ImageOutputFormat.Png, 100, 100, enlarge: false);
+        ImageTransforms.Resize(source, destination, ImageEncoding.Png(), 100, 100, enlarge: false);
         var output = backing.ToArray();
 
         using var image = DecodedImage.Open(output);
@@ -27,11 +27,11 @@ public class StreamTests
     {
         var bytes = SampleImages.HorizontalHalves(400, 200);
         Action<Stream, Stream> render = (source, destination) =>
-            ImageTransforms.Resize(source, destination, new ImageResize(ImageOutputFormat.Png)
+            ImageTransforms.Resize(source, destination, new ImageResize(ImageEncoding.Png())
             {
                 Width = 100,
                 Height = 200,
-                Fit = ImageFit.Zoom,
+                Mode = ResizeMode.Crop,
             });
         var seekable = Transform.Png(bytes, render);
 

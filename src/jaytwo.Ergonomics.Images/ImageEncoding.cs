@@ -7,36 +7,44 @@ namespace jaytwo.Ergonomics.Images;
 /// </summary>
 /// <remarks>
 /// Each format exposes only the options that apply to it.
-/// JPEG, WebP, AVIF, and HEIC take a quality. PNG, GIF, and TIFF do not.
+/// JPEG, AVIF, and HEIC take a quality. WebP takes a <see cref="WebPCompression"/> (lossy quality or lossless).
+/// PNG, GIF, and TIFF do not.
 /// Formats that cannot store alpha (JPEG) also take an <see cref="JpegEncoding.AlphaFallbackColor"/>.
 /// </remarks>
 public abstract record ImageEncoding
 {
+    /// <summary>Default lossy quality for JPEG.</summary>
+    public const int DefaultJpegQuality = 85;
+
+    /// <summary>Default lossy quality for WebP.</summary>
+    public const int DefaultWebPQuality = 85;
+
+    /// <summary>Default lossy quality for AVIF.</summary>
+    public const int DefaultAvifQuality = 85;
+
+    /// <summary>Default lossy quality for HEIC.</summary>
+    public const int DefaultHeicQuality = 85;
+
     private ImageEncoding()
     {
     }
 
     /// <summary>
-    /// Gets a value indicating whether EXIF/XMP orientation is applied before geometry.
-    /// </summary>
-    /// <remarks>
-    /// Defaults to <c>true</c>. Width and height then describe the visually upright image.
-    /// </remarks>
-    public bool AutoOrient { get; init; } = true;
-
-    /// <summary>
     /// Gets which metadata is written. Defaults to <see cref="MetadataPolicy.PreserveColorProfileOnly"/>.
     /// </summary>
+    /// <remarks>
+    /// Encode policy only. Auto-orient is source admission on <see cref="ImagePipeline.Create"/>.
+    /// </remarks>
     public MetadataPolicy Metadata { get; init; } = MetadataPolicy.PreserveColorProfileOnly;
 
     /// <summary>Gets the destination codec.</summary>
     public abstract ImageOutputFormat Format { get; }
 
     /// <summary>JPEG with lossy quality and an alpha fallback for remaining transparency.</summary>
-    /// <param name="quality">Lossy quality from 1 to 100. Defaults to 80.</param>
+    /// <param name="quality">Lossy quality from 1 to 100. Defaults to <see cref="DefaultJpegQuality"/>.</param>
     /// <param name="alphaFallbackColor">Flatten color when alpha remains. Defaults to white.</param>
     /// <returns>A JPEG encoding.</returns>
-    public static JpegEncoding Jpeg(int quality = 80, ImageColor? alphaFallbackColor = null)
+    public static JpegEncoding Jpeg(int quality = DefaultJpegQuality, ImageColor? alphaFallbackColor = null)
         => new(quality, alphaFallbackColor ?? ImageColor.White);
 
     /// <summary>Lossless PNG.</summary>
@@ -44,14 +52,19 @@ public abstract record ImageEncoding
     public static PngEncoding Png() => new();
 
     /// <summary>WebP with lossy quality.</summary>
-    /// <param name="quality">Lossy quality from 1 to 100. Defaults to 60.</param>
+    /// <param name="quality">Lossy quality from 1 to 100. Defaults to <see cref="DefaultWebPQuality"/>.</param>
     /// <returns>A WebP encoding.</returns>
-    public static WebPEncoding WebP(int quality = 60) => new(quality);
+    public static WebPEncoding WebP(int quality = DefaultWebPQuality) => new(WebPCompression.Lossy(quality));
+
+    /// <summary>WebP with the given compression (lossy quality or lossless).</summary>
+    /// <param name="compression">Lossy or lossless.</param>
+    /// <returns>A WebP encoding.</returns>
+    public static WebPEncoding WebP(WebPCompression compression) => new(compression);
 
     /// <summary>AVIF with lossy quality.</summary>
-    /// <param name="quality">Lossy quality from 1 to 100. Defaults to 85.</param>
+    /// <param name="quality">Lossy quality from 1 to 100. Defaults to <see cref="DefaultAvifQuality"/>.</param>
     /// <returns>An AVIF encoding.</returns>
-    public static AvifEncoding Avif(int quality = 85) => new(quality);
+    public static AvifEncoding Avif(int quality = DefaultAvifQuality) => new(quality);
 
     /// <summary>GIF. Animated sources are reduced to the first frame.</summary>
     /// <returns>A GIF encoding.</returns>
@@ -62,68 +75,9 @@ public abstract record ImageEncoding
     public static TiffEncoding Tiff() => new();
 
     /// <summary>HEIC with lossy quality.</summary>
-    /// <param name="quality">Lossy quality from 1 to 100. Defaults to 85.</param>
+    /// <param name="quality">Lossy quality from 1 to 100. Defaults to <see cref="DefaultHeicQuality"/>.</param>
     /// <returns>A HEIC encoding.</returns>
-    public static HeicEncoding Heic(int quality = 85) => new(quality);
-
-    internal static ImageEncoding From(ImageOutputFormat format, ImageEncode? encode)
-    {
-        if (encode is null)
-        {
-            return format switch
-            {
-                ImageOutputFormat.Jpeg => Jpeg(),
-                ImageOutputFormat.Png => Png(),
-                ImageOutputFormat.WebP => WebP(),
-                ImageOutputFormat.Avif => Avif(),
-                ImageOutputFormat.Gif => Gif(),
-                ImageOutputFormat.Tiff => Tiff(),
-                ImageOutputFormat.Heic => Heic(),
-                _ => throw new ArgumentOutOfRangeException(nameof(format)),
-            };
-        }
-
-        var settings = ImageTransforms.Settings(encode, nameof(encode));
-        return format switch
-        {
-            ImageOutputFormat.Jpeg => Jpeg(settings.Quality, settings.AlphaFallbackColor) with
-            {
-                AutoOrient = settings.AutoOrient,
-                Metadata = settings.Metadata,
-            },
-            ImageOutputFormat.Png => Png() with
-            {
-                AutoOrient = settings.AutoOrient,
-                Metadata = settings.Metadata,
-            },
-            ImageOutputFormat.WebP => WebP(settings.Quality) with
-            {
-                AutoOrient = settings.AutoOrient,
-                Metadata = settings.Metadata,
-            },
-            ImageOutputFormat.Avif => Avif(settings.Quality) with
-            {
-                AutoOrient = settings.AutoOrient,
-                Metadata = settings.Metadata,
-            },
-            ImageOutputFormat.Gif => Gif() with
-            {
-                AutoOrient = settings.AutoOrient,
-                Metadata = settings.Metadata,
-            },
-            ImageOutputFormat.Tiff => Tiff() with
-            {
-                AutoOrient = settings.AutoOrient,
-                Metadata = settings.Metadata,
-            },
-            ImageOutputFormat.Heic => Heic(settings.Quality) with
-            {
-                AutoOrient = settings.AutoOrient,
-                Metadata = settings.Metadata,
-            },
-            _ => throw new ArgumentOutOfRangeException(nameof(format)),
-        };
-    }
+    public static HeicEncoding Heic(int quality = DefaultHeicQuality) => new(quality);
 
     internal void Validate()
     {
@@ -138,7 +92,15 @@ public abstract record ImageEncoding
                 RequireQuality(jpeg.Quality);
                 break;
             case WebPEncoding webP:
-                RequireQuality(webP.Quality);
+                switch (webP.Compression)
+                {
+                    case null:
+                        throw new ArgumentException("WebP compression is required.");
+                    case WebPCompression.LossyMode lossy:
+                        RequireQuality(lossy.Quality);
+                        break;
+                }
+
                 break;
             case AvifEncoding avif:
                 RequireQuality(avif.Quality);
@@ -154,12 +116,14 @@ public abstract record ImageEncoding
         return this switch
         {
             JpegEncoding jpeg => jpeg.Quality,
-            WebPEncoding webP => webP.Quality,
+            WebPEncoding { Compression: WebPCompression.LossyMode lossy } => lossy.Quality,
             AvifEncoding avif => avif.Quality,
             HeicEncoding heic => heic.Quality,
-            _ => 85,
+            _ => DefaultJpegQuality,
         };
     }
+
+    internal bool WebPLosslessOrDefault() => this is WebPEncoding { Compression: WebPCompression.LosslessMode };
 
     internal ImageColor AlphaFallbackOrDefault()
     {
@@ -180,7 +144,7 @@ public abstract record ImageEncoding
         /// <summary>
         /// Initializes a new instance of the <see cref="JpegEncoding"/> class.
         /// </summary>
-        public JpegEncoding(int quality = 80, ImageColor? alphaFallbackColor = null)
+        public JpegEncoding(int quality = DefaultJpegQuality, ImageColor? alphaFallbackColor = null)
         {
             RequireQuality(quality);
             Quality = quality;
@@ -196,7 +160,13 @@ public abstract record ImageEncoding
         /// <summary>
         /// Gets the color used when remaining alpha cannot be stored in JPEG.
         /// </summary>
-        /// <remarks>Defaults to white.</remarks>
+        /// <remarks>
+        /// Defaults to white. This is the third alpha knob: encode-time only, and only for formats
+        /// that cannot store alpha. It flattens whatever alpha remains after
+        /// <see cref="AlphaBehavior"/> and <see cref="ImageCanvas"/> (transparent pad gaps,
+        /// preserved content holes, expand corners). It does not replace a canvas plate, and a
+        /// canvas does not replace this fallback when the encoder still cannot write alpha.
+        /// </remarks>
         public ImageColor AlphaFallbackColor { get; init; }
     }
 
@@ -213,17 +183,17 @@ public abstract record ImageEncoding
         /// <summary>
         /// Initializes a new instance of the <see cref="WebPEncoding"/> class.
         /// </summary>
-        public WebPEncoding(int quality = 60)
+        /// <param name="compression">Lossy quality or lossless. Defaults to lossy at <see cref="DefaultWebPQuality"/>.</param>
+        public WebPEncoding(WebPCompression? compression = null)
         {
-            RequireQuality(quality);
-            Quality = quality;
+            Compression = compression ?? WebPCompression.Lossy();
         }
 
         /// <inheritdoc />
         public override ImageOutputFormat Format => ImageOutputFormat.WebP;
 
-        /// <summary>Gets the lossy quality, from 1 to 100.</summary>
-        public int Quality { get; init; }
+        /// <summary>Gets whether WebP is lossy or lossless.</summary>
+        public WebPCompression Compression { get; init; }
     }
 
     /// <summary>AVIF output encoding.</summary>
@@ -232,7 +202,7 @@ public abstract record ImageEncoding
         /// <summary>
         /// Initializes a new instance of the <see cref="AvifEncoding"/> class.
         /// </summary>
-        public AvifEncoding(int quality = 85)
+        public AvifEncoding(int quality = DefaultAvifQuality)
         {
             RequireQuality(quality);
             Quality = quality;
@@ -265,7 +235,7 @@ public abstract record ImageEncoding
         /// <summary>
         /// Initializes a new instance of the <see cref="HeicEncoding"/> class.
         /// </summary>
-        public HeicEncoding(int quality = 85)
+        public HeicEncoding(int quality = DefaultHeicQuality)
         {
             RequireQuality(quality);
             Quality = quality;

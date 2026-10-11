@@ -14,9 +14,9 @@ Targets `net8.0` and `net6.0`. The processing engine is [NetVips](https://github
 - [Charter](#charter)
 - [Pipeline](#pipeline)
 - [Operations](#operations)
-- [Fit and canvas](#fit-and-canvas)
+- [Resize mode and canvas](#resize-mode-and-canvas)
 - [Rotation](#rotation)
-- [Source alpha](#source-alpha)
+- [Alpha: three separate knobs](#alpha-three-separate-knobs)
 - [Target](#target)
 - [Sizes](#sizes)
 - [Options](#options)
@@ -56,10 +56,11 @@ This library is that API. It is a thin layer on libvips.
 ### What it is
 
 - `ImagePipeline`, a reusable ordered fluent specification that runs from `Stream` to `Stream` (`Run` or `RunAsync`) and returns the size written. Compatible stages share one lazy libvips graph and encode once.
-- Thin shortcuts: `ImageTransforms.Resize` and `ImageTransforms.Rotate` compile into a pipeline. Fit is the short resize call. `ImageResize` / `ImageRotate` remain option bags for those shortcuts.
-- Square `ImageSize` frames from 128 to 4096. `Thumbnail` is `S`. `Preview` is `L`. `ImagePresets` are pipelines built from the same primitives.
+- Thin shortcuts: `ImageTransforms.Resize`, `ImageTransforms.Rotate`, and `ImageTransforms.Crop` compile into a pipeline. Pad is the short resize call. `ImageResize` / `ImageRotate` / `ImageCrop` remain option bags for those shortcuts. Shortcuts and the pipeline share `ImageEncoding`.
+- Square `ImageSize` frames from 128 to 4096. `Thumbnail` is `S`. `Preview` is `L`. `ImagePresets.ThumbnailWebP` / `PreviewWebP` are pipelines (frame + WebP) built from the same primitives.
 - Visual dimensions by default (`Autorot` before geometry)
 - A small metadata policy: keep, strip, or keep the color profile only
+- `ImageTransforms.Identify` for layered structure + EXIF/XMP/IPTC/ICC bags and common capture/GPS/camera fields
 - A capability check that only reports HEIC when a real HEVC sample decodes
 
 ### What it is not
@@ -77,10 +78,8 @@ Describe operations in order. The chain does not own streams; call `Run` when yo
 
 ```csharp
 var pipeline = ImagePipeline.Create()
-    .Rotate(ImageRotation.Clockwise(12))
-    .Trim()
-    .Resize(ImageSize.M)
-    .Fit(ImageFit.Zoom)
+    .Rotate(ImageRotation.Clockwise(12), r => r.Trim())
+    .Resize(ImageSize.M, ResizeMode.Crop)
     .Encoding(ImageEncoding.WebP());
 
 using var source = File.OpenRead(path);
@@ -88,16 +87,31 @@ using var destination = File.Create(outputPath);
 var size = pipeline.Run(source, destination);
 ```
 
-`.Resize` sets the frame. `.Fit(ImageFit)` sets the mode (`Fit`, `Zoom`, or `Stretch`). `.Encoding` takes a format-specific object (`ImageEncoding.Jpeg`, `WebP`, `Png`, …) so each format only exposes valid options: JPEG/WebP have quality, JPEG has `AlphaFallbackColor`, PNG has neither. Defaults are JPEG quality 80 and WebP quality 60. Shortcuts such as `.EncodingJpeg()`, `.EncodingWebP()`, and `.EncodingPng()` are available. `.SourceAlpha` is a policy: last call wins, and its place in the chain does not change when it runs. Auto-orient is a default preamble.
+Stage options use the same lambda shape as `Create`. Source admission is on `Create`; resize options (`Aspect`, `Focus`, `Enlarge`, `Canvas`) are on `Resize`; rotate options (`Trim`, `Expand`, `Aspect`, `Canvas`) are on `Rotate`:
+
+```csharp
+ImagePipeline.Create(s => s.SourceAlpha(AlphaBehavior.Flatten(ImageColor.White)))
+    .Resize(ImageSize.Thumbnail, ResizeMode.Crop, r => r.Focus(focus).Enlarge(true))
+    .EncodingWebP();
+```
+
+`.Resize` sets the frame and optional mode (`Pad`, `Crop`, or `Distort`; defaults to `Pad`). Upscale is off unless `r.Enlarge(true)` / bag `enlarge: true`. `.Encoding` takes a format-specific object (`ImageEncoding.Jpeg`, `WebP`, `Png`, …) so each format only exposes valid options: JPEG has quality and `AlphaFallbackColor`; WebP takes `WebPCompression` (lossy quality via `WebP(80)` / `WebPCompression.Lossy(80)`, or `WebPCompression.Lossless`); PNG has neither. JPEG, lossy WebP, and AVIF default to quality 85. Shortcuts such as `.EncodingJpeg()`, `.EncodingWebP()`, `.EncodingWebP(WebPCompression.Lossless)`, and `.EncodingPng()` are available. Omit the `Create` configure action to auto-orient and preserve source transparency. Metadata and format options live on encoding.
 
 Presets are ordinary pipelines:
 
 ```csharp
-var thumbnail = ImagePipeline.Preset(ImagePresets.Thumbnail)
-    .SourceAlpha(AlphaBehavior.Preserve);
+var thumbnail = ImagePipeline.Preset(ImagePresets.ThumbnailWebP);
 
 thumbnail.Run(input1, output1);
 thumbnail.Run(input2, output2);
+```
+
+To flatten on a thumbnail-sized pipeline, start from `Create`:
+
+```csharp
+var flatThumbnail = ImagePipeline.Create(s => s.SourceAlpha(AlphaBehavior.Flatten(ImageColor.White)))
+    .Resize(ImageSize.Thumbnail)
+    .EncodingWebP();
 ```
 
 For ASP.NET request/response bodies (and other streams that require async I/O), use `RunAsync`. Native libvips work stays synchronous on a worker; pipes bridge `ReadAsync` / `WriteAsync`, and the cancellation token kills the native encode:
@@ -116,69 +130,108 @@ Output format is an argument because a stream has no filename. Source format is 
 using var source = File.OpenRead(path);
 using var destination = File.Create(outputPath);
 
-var size = ImageTransforms.Resize(source, destination, ImageOutputFormat.Jpeg, 1920, 1080, enlarge: false);
+var size = ImageTransforms.Resize(source, destination, ImageEncoding.Jpeg(), 1920, 1080);
 ```
 
-`size` is the pixels in `destination`. This call fits the whole image inside the box. `enlarge: false` leaves a source smaller than 1920x1080 at its own size. The default call, without that flag, may enlarge.
+`size` is the pixels in `destination`. This call pads the whole image inside the box (`ResizeMode.Pad`). A source smaller than 1920×1080 stays at its own size unless you pass `enlarge: true`.
 
-`ImageTransforms.Resize(source, destination, ImageOutputFormat.Jpeg)` re-encodes at the current size. Auto-orient still runs, so a sideways photo comes back upright.
+`ImageTransforms.Resize(source, destination, ImageEncoding.Jpeg())` re-encodes at the current size. Auto-orient still runs, so a sideways photo comes back upright.
 
-Passing width, height, or both on that overload fits the image inside that limit and keeps the aspect ratio. One side of a box can come back short. There are no bars and no crop. A missing side is calculated from the source aspect. When neither is passed, the source size is kept.
+Passing width, height, or both on that overload pads the image inside that limit and keeps the aspect ratio. One side of a box can come back short. There are no bars and no cover-crop. A missing side is calculated from the source aspect. When neither is passed, the source size is kept.
 
-`ImageResize` is the call that sets a fit, a canvas, or an aspect ratio.
+`ImageResize` is the call that sets a mode, a canvas, or an aspect ratio.
 
 ```csharp
-ImageTransforms.Resize(source, destination, new ImageResize(ImageOutputFormat.Jpeg)
+ImageTransforms.Resize(source, destination, new ImageResize(ImageEncoding.Jpeg())
 {
     Width = 400,
     Height = 300,
-    Fit = ImageFit.Zoom,
+    Mode = ResizeMode.Crop,
 });
 
-ImageTransforms.Resize(source, destination, new ImageResize(ImageOutputFormat.Jpeg)
+ImageTransforms.Resize(source, destination, new ImageResize(ImageEncoding.Jpeg())
 {
     Aspect = ImageAspectRatio.Square,
-    Fit = ImageFit.Zoom,
+    Mode = ResizeMode.Crop,
 });
 
-ImageTransforms.Resize(source, destination, new ImageResize(ImageOutputFormat.Jpeg)
+ImageTransforms.Resize(source, destination, new ImageResize(ImageEncoding.Jpeg())
 {
     Aspect = ImageAspectRatio.Square,
     Canvas = ImageCanvas.SolidBlack,
 });
 ```
 
-## Fit and canvas
+## Resize mode and canvas
 
-| `ImageFit` | Result |
+Magick-style labels: pad inside the frame, crop to fill, or distort to the exact size.
+
+| `ResizeMode` | Result |
 | --- | --- |
-| `Fit` | Aspect ratio stays. The whole image scales inside the frame. One side can come back short. A canvas is a separate choice and is what makes the output match the frame. |
-| `Zoom` | Aspect ratio stays. The image scales until the frame is filled, then the overflow is discarded. The center is kept. `ImageFocus` moves that window so a relative rectangle stays inside it. When the rectangle does not fit, cropping stops there and the rest of the frame is canvas. With enlarge left on, the output matches the frame. With enlarge off, a window that still has the frame's aspect ratio can be smaller than the frame. A window that stopped early still paints the frame. |
-| `Stretch` | Exactly the requested size. Aspect ratio is ignored. |
+| `Pad` | Aspect ratio stays. The whole image scales inside the frame (contain). One side can come back short. A canvas is a separate choice and is what makes the output match the frame. |
+| `Crop` | Aspect ratio stays. The image scales until the frame is filled, then the overflow is discarded (cover). The center is kept. `ImageFocus` moves that window so a relative rectangle stays inside it. When the rectangle does not fit, cropping stops there and the rest of the frame is canvas. With enlarge on, the output matches the frame. With enlarge off (the default), a window that still has the frame's aspect ratio can be smaller than the frame. A window that stopped early still paints the frame. Not the same as the `.Crop(x, y, width, height)` stage, which extracts an explicit rectangle. |
+| `Distort` | Exactly the requested size. Aspect ratio is ignored. Enlarge does not apply. |
 
-A canvas applies with `Fit`. `SolidBlack`, `SolidWhite`, and `Solid(ImageColor)` paint the gap. `Transparent` leaves it empty. The output matches the frame. `enlarge: false` keeps a smaller source from growing and still paints an exact frame. `Stretch` does not take `enlarge: false`.
+A canvas applies with `Pad`. On `Crop`, a canvas is only the remainder when `Focus` does not fit; without `Focus`, Crop rejects a canvas. The output matches the frame when a plate is used. Enlarge stays off by default, so a smaller source does not grow; with a Pad canvas the frame is still painted. Configure canvas on that stage: `.Resize(..., r => r.Canvas(...))` or `.Rotate(..., r => r.Expand().Canvas(...))`. On a rotation, canvas requires Expand (it does not convert Trim to Expand).
 
-`ImageFocus` is a rectangle on the upright image. `X`, `Y`, `Width`, and `Height` are fractions from 0 to 1, measured from the top left. The cover window keeps its size and shifts so the rectangle stays inside. `ImageFocus.Point(x, y)` is that same rectangle with no area, and the point stays visible. If the rectangle is larger than the cover window, the crop stops at the rectangle and `Canvas` fills the frame. Omit the canvas and the gap is transparent.
+Canvas plates are RGB (`ImageColor` is three 8-bit channels). The image on the plate must already be RGB or RGBA. Greyscale and other band layouts throw when a canvas is applied — there is no silent colorspace conversion. Omit the canvas, or convert the source to RGB first (see `todo/rgb-canvas.md`).
+
+How each plate behaves (with `SourceAlpha` left on Preserve):
+
+| Canvas | Invented gaps | Preserved content alpha |
+| --- | --- | --- |
+| `Transparent` | Fully transparent | Left alone (true holes) |
+| `SolidBlack` / `SolidWhite` / `Solid(color)` | That color | Shows that color through content holes |
+| `Checkerboard` | Checkerboard | Always composites over a full-frame grid, even when the image already fills the frame |
+
+`ImageFocus` is a rectangle on the upright image. `X`, `Y`, `Width`, and `Height` are fractions from 0 to 1, measured from the top left. The cover window keeps its size and shifts so the rectangle stays inside. `ImageFocus.Point(x, y)` is that same rectangle with no area, and the point stays visible. If the rectangle is larger than the cover window, the crop stops at the rectangle and `Canvas` fills the frame. Omit the canvas and the remainder is transparent.
 
 ```csharp
-ImageTransforms.Resize(source, destination, new ImageResize(ImageOutputFormat.Jpeg, ImageSize.Preview)
+ImageTransforms.Resize(source, destination, new ImageResize(ImageEncoding.Jpeg(), ImageSize.Preview)
 {
-    Fit = ImageFit.Zoom,
+    Mode = ResizeMode.Crop,
     Focus = new ImageFocus(0.62, 0.18, 0.22, 0.30),
 });
 ```
 
-## Rotation
-
-`ImageTransforms.Rotate` turns the image after auto-orient. Set `AutoOrient` to false to turn the stored raster instead. Either way, the output orientation tag is cleared, so a viewer does not rotate the result again.
+Face or object detection stays in application code. Map the detector's box into upright relative coordinates, then pass an `ImageFocus`. The focus constrains where the cover window sits; it does not set the window size. To extract a computed rectangle instead, use an explicit `.Crop(x, y, width, height)` stage (same relative coordinates) before or after other stages.
 
 ```csharp
-ImageTransforms.Rotate(source, destination, new ImageRotate(ImageOutputFormat.Png)
+// faceBox.X/Y/Width/Height are fractions of the upright image (after the same orient policy you use at Run).
+var focus = new ImageFocus(faceBox.X, faceBox.Y, faceBox.Width, faceBox.Height);
+
+var pipeline = ImagePipeline.Create()
+    .Resize(ImageSize.Thumbnail, ResizeMode.Crop, r => r
+        .Aspect(ImageAspectRatio.Square)
+        .Focus(focus))
+    .EncodingJpeg();
+
+pipeline.Run(source, destination);
+```
+
+```csharp
+// Extract a detector box, then pad the result in a thumbnail frame.
+var pipeline = ImagePipeline.Create()
+    .Crop(faceBox.X, faceBox.Y, faceBox.Width, faceBox.Height)
+    .Resize(ImageSize.Thumbnail)
+    .EncodingJpeg();
+
+pipeline.Run(source, destination);
+
+// Or the thin shortcut:
+ImageTransforms.Crop(source, destination, new ImageCrop(ImageEncoding.Jpeg(), faceBox.X, faceBox.Y, faceBox.Width, faceBox.Height));
+```
+## Rotation
+
+`ImageTransforms.Rotate` turns the image after auto-orient. Set `AutoOrient = false` on the rotate bag (or `Create(s => s.AutoOrient(false))` on a pipeline) to turn the stored raster instead. Either way, the output orientation tag is cleared, so a viewer does not rotate the result again.
+
+```csharp
+ImageTransforms.Rotate(source, destination, new ImageRotate(ImageEncoding.Png())
 {
     Rotation = ImageRotation.Clockwise(12),
 });
 
-ImageTransforms.Rotate(source, destination, new ImageRotate(ImageOutputFormat.Png)
+ImageTransforms.Rotate(source, destination, new ImageRotate(ImageEncoding.Png())
 {
     Rotation = ImageRotation.CounterClockwise(7.5),
     Bounds = RotationBounds.Trim,
@@ -192,15 +245,25 @@ ImageTransforms.Rotate(source, destination, new ImageRotate(ImageOutputFormat.Pn
 
 `RotationBounds.Trim` keeps the largest centered axis-aligned rectangle that stays inside the rotated image. `Aspect` on a trim is that same rectangle at the requested ratio, still centered. It is not a second resize. An aspect ratio applies with `Trim`. A canvas applies with `Expand`.
 
-`SourceAlpha` is resolved on the upright image before the turn. A flattened or checkerboard source does not paint the corners Expand adds.
+Source admission (auto-orient and source alpha on `Create` or the rotate bag) runs before the turn. Flattening the source does not paint the corners Expand adds; those use `Canvas`.
 
-## Source alpha
+## Alpha: three separate knobs
 
-`SourceAlpha` is transparency inside the source. It defaults to `Preserve`. `Flatten(ImageColor.White)` composites that transparency onto a color. `Checkerboard()` paints an 8-pixel white and gray grid under it, after the resize.
+Transparency shows up in three places. They are not interchangeable.
 
-The canvas stays separate. A transparent canvas can surround a checkerboard, and a black canvas can show through preserved source transparency.
+| Knob | Where | When | What it does |
+| --- | --- | --- |
+| `SourceAlpha` (`AlphaBehavior`) | `Create(...)` / option bags | After auto-orient, before geometry | `Preserve` (default) keeps source-pixel holes. `Flatten(color)` composites the source onto a color so geometry sees an opaque raster. |
+| `ImageCanvas` | `Resize` / `Rotate` configure / bags | After geometry invents area (or always for checkerboard) | Plate under pad letterboxes, crop-focus remainders, and expand corners. Solid and checkerboard plates also show through preserved content alpha. `Transparent` invents empty gaps only. `Checkerboard` always builds a full-frame preview grid. |
+| `AlphaFallbackColor` | `ImageEncoding.Jpeg` only | Encode, last | Formats that cannot store alpha flatten whatever alpha remains (gaps + content holes) onto this color (default white). |
 
-`AlphaFallbackColor` on JPEG encoding runs last, and only when the output cannot store alpha. JPEG flattens whatever remains onto that color, which defaults to white.
+Examples:
+
+- Preserve + `Transparent` + PNG → content holes and pad gaps stay true transparency.
+- Preserve + `SolidBlack` + PNG → pad gaps are black, and content holes show black through them.
+- `Flatten(White)` + `Transparent` + PNG → source holes are already white; only pad gaps stay transparent.
+- Preserve + `Transparent` + JPEG → encode fallback paints remaining alpha (gaps and holes) white unless you change `AlphaFallbackColor`.
+- `Checkerboard` is a canvas plate for previewing transparency, not a source-alpha policy.
 
 ## Target
 
@@ -208,9 +271,9 @@ The frame comes from the width and height, an `ImageAspectRatio`, or both.
 
 | What is set | Frame |
 | --- | --- |
-| Width, height, or both | That pixel box. One side on a fit, with no aspect ratio, is completed from the source. |
-| Aspect ratio only, `Zoom` | Discard overflow until the image has that ratio, at the source size. The center is kept. A focus box moves that window. |
-| Aspect ratio only, `Fit` and a canvas | Pad to that ratio at the source size. |
+| Width, height, or both | That pixel box. One side on a pad, with no aspect ratio, is completed from the source. |
+| Aspect ratio only, `Crop` | Discard overflow until the image has that ratio, at the source size. The center is kept. A focus box moves that window. |
+| Aspect ratio only, `Pad` and a canvas | Pad to that ratio at the source size. |
 | Aspect ratio and one side | The other side is calculated from the ratio. |
 | Aspect ratio and both sides | The sides are a maximum box. The frame is the largest rectangle of that ratio inside the box. |
 
@@ -218,7 +281,7 @@ Named ratios are `Square`, `FourByThree`, `ThreeByFour`, `SixteenByNine`, and `N
 
 ## Sizes
 
-`ImageSize` is a width and height. `Resize` returns the size it wrote. The named sizes are square frames. A fit keeps the aspect ratio, so one side can come back short.
+`ImageSize` is a width and height. `Resize` returns the size it wrote. The named sizes are square frames. A pad keeps the aspect ratio, so one side can come back short.
 
 | Size | Frame |
 | --- | --- |
@@ -229,50 +292,78 @@ Named ratios are `Square`, `FourByThree`, `ThreeByFour`, `SixteenByNine`, and `N
 | `XL` | 2048 × 2048 |
 | `XXL` | 4096 × 4096 |
 
-`Thumbnail` is `S`. `Preview` is `L`. Any other frame is `new ImageSize(width, height)`. A named size is only the frame. It does not change the fit, the canvas, or the metadata policy.
+`Thumbnail` is `S`. `Preview` is `L`. Any other frame is `new ImageSize(width, height)`. A named size is only the frame. It does not change the mode, the canvas, or the metadata policy.
 
 ```csharp
-var size = ImageTransforms.Resize(source, destination, ImageOutputFormat.Jpeg, ImageSize.Preview);
+var size = ImageTransforms.Resize(source, destination, ImageEncoding.Jpeg(), ImageSize.Preview);
 ```
 
-`new ImageResize(format, ImageSize.L)` sets that frame on the options object.
+`new ImageResize(ImageEncoding.Jpeg(), ImageSize.L)` sets that frame on the options object.
 
 ## Options
 
 ```csharp
-ImageTransforms.Resize(source, destination, new ImageResize(ImageOutputFormat.WebP)
+ImageTransforms.Resize(source, destination, new ImageResize(
+    ImageEncoding.WebP(80) with { Metadata = MetadataPolicy.Strip })
 {
     Width = 512,
     Height = 512,
     Canvas = ImageCanvas.SolidBlack,
-    Encode = new ImageEncode
-    {
-        Metadata = MetadataPolicy.Strip,
-        Quality = 80
-    }
 });
 ```
 
 | Property | Default | Meaning |
 | --- | --- | --- |
-| `AutoOrient` | `true` | Apply orientation metadata before measuring and resizing. |
-| `Metadata` | `PreserveColorProfileOnly` | See below. |
-| `Quality` | see notes | `ImageEncoding.Jpeg` defaults to 80, `WebP` to 60, AVIF/HEIC to 85. Range 1-100. PNG has no quality. |
+| `AutoOrient` | `true` | Source admission on `Create` / option bags. Apply orientation before measuring and geometry. |
+| `SourceAlpha` | Preserve | Source admission on `Create` / option bags. |
+| `Metadata` | `PreserveColorProfileOnly` | On encoding only. See below. |
+| `Quality` | see notes | On JPEG, AVIF, and HEIC factories. Defaults are `DefaultJpegQuality` / `DefaultAvifQuality` / `DefaultHeicQuality` (all 85). Range 1-100. PNG, GIF, and TIFF have no quality. |
+| `Compression` | lossy 85 | On WebP encoding only. `WebPCompression.Lossy(quality)` or `WebPCompression.Lossless`. `ImageEncoding.WebP(80)` is lossy shorthand. |
 | `AlphaFallbackColor` | white | On JPEG encoding only. Used when remaining alpha cannot be stored. |
+| `Enlarge` | false | Allow upscaling on Pad/Crop. Distort always writes the requested size. |
 
-Pass `encode` only when a default should change.
+Pass encoding overrides only when a default should change. Shortcuts and the pipeline share `ImageEncoding`. Auto-orient is not on encoding.
 
-`ImageTransforms.Resize` / `Rotate` compile into `ImagePipeline` and call `Run`. Prefer the pipeline when order matters (for example rotate, then resize) so stages share one native graph.
+`ImageTransforms.Resize` / `Rotate` / `Crop` compile into `ImagePipeline` and call `Run`. Prefer the pipeline when order matters (for example crop, then resize) so stages share one native graph.
 
 ## Orientation
 
-JPEG and HEIC often store the sensor raster sideways and put the display rotation in EXIF. With `AutoOrient` left on, a 4032x3024 file tagged as 90 degrees is treated as 3024x4032.
+JPEG and HEIC often store the sensor raster sideways and put the display rotation in EXIF. With auto-orient left on (the default on `Create` / bags), a 4032x3024 file tagged as 90 degrees is treated as 3024x4032.
 
 The rotation is libvips `Autorot` (via thumbnail's rotate, not a hand-rolled EXIF switch). After the pixels move, the orientation tag is reset, so a later viewer does not rotate the derivative again. A caller-requested turn is `ImageTransforms.Rotate`, and it runs after this step.
 
-Set `AutoOrient` to false only when you mean the stored raster. Width and height then apply to that raster, and a preserved orientation tag is left as it was.
+Turn auto-orient off only when you mean the stored raster:
+
+```csharp
+ImagePipeline.Create(s => s.AutoOrient(false))
+    .Encoding(ImageEncoding.Jpeg() with { Metadata = MetadataPolicy.Preserve });
+```
+
+Width and height then apply to that raster. With `Metadata = Preserve`, a preserved orientation tag is left as it was.
 
 ## Metadata
+
+### Identify (read)
+
+```csharp
+using var source = File.OpenRead(path);
+var meta = ImageTransforms.Identify(source);
+
+meta.Structure.Size;       // stored pixels
+meta.Structure.VisualSize; // after EXIF orientation swap
+meta.Structure.Format;     // ImageFormat
+meta.Exif.Fields;          // libvips EXIF names → plain strings
+meta.Xmp.Xml;              // opaque XMP packet, or null
+meta.Iptc.Present;
+meta.ColorProfile.Present;
+meta.CapturedAt;           // EXIF DateTimeOriginal → Digitised → DateTime
+meta.Latitude;             // EXIF GPS IFD, decimal degrees
+meta.CameraMake;
+```
+
+Identify opens the header (typical formats do not force a full pixel decode). It does not auto-orient; use `VisualSize` when you need the upright frame. Same facts can exist in EXIF, XMP, and IPTC; convenience properties resolve from EXIF only in this version. This is read-only — not an EXIF editor.
+
+### Encode policy
 
 | Policy | EXIF / XMP / IPTC | ICC profile |
 | --- | --- | --- |
@@ -282,21 +373,19 @@ Set `AutoOrient` to false only when you mean the stored raster. Width and height
 
 `PreserveColorProfileOnly` is the default so a thumbnail does not publish camera or GPS tags by accident, and color still renders with the profile.
 
-This is not an EXIF editor. There is no typed `CapturedAt` / `Latitude` facade in this version.
-
 ## Formats
 
 | Format | Decode | Encode | Notes |
 | --- | --- | --- | --- |
 | JPEG | yes | yes | Remaining alpha is flattened onto `AlphaFallbackColor`. |
 | PNG | yes | yes | Alpha kept. `Quality` is ignored. |
-| WebP | yes | yes | |
+| WebP | yes | yes | `WebPCompression` lossy or lossless. |
 | AVIF | when the runtime has an AV1 decoder | when it has an AV1 encoder | `NetVips.Native` includes both. |
-| GIF | yes | yes | First frame only. |
+| GIF | yes | yes | First frame only (same for animated WebP input). |
 | TIFF | yes | yes | First page only. |
 | HEIC | when the runtime has an HEVC decoder | when it has an HEVC encoder | `NetVips.Native` has neither. |
 
-Animated GIF and multi-page TIFF are reduced to the first frame on purpose. HEIF is not limited that way: a still HEIC can be stored as a tile grid, and keeping one tile would return a slice of the photo.
+Animated GIF, animated WebP, and multi-page TIFF are reduced to the first frame on purpose. HEIF is not limited that way: a still HEIC can be stored as a tile grid, and keeping one tile would return a slice of the photo.
 
 ## Streaming
 
@@ -308,9 +397,9 @@ Callers never have to copy the compressed input or the encoded output into a `by
 
 `RunAsync` adds pipes on both ends so async-only streams (ASP.NET bodies) never see sync `Read` / `Write`. The native graph still runs synchronously on a worker thread.
 
-Some inputs are not streamed end to end. A center zoom that does not enlarge, and a zoom with a focus box, decode the oriented image once and then extract. Orientation and some codecs also cause libvips to buffer. The guarantee is only that the API does not force that buffer into managed arrays.
+Some inputs are not streamed end to end. A center crop that does not enlarge, and a crop with a focus box, decode the oriented image once and then extract. Orientation and some codecs also cause libvips to buffer. The guarantee is only that the API does not force that buffer into managed arrays.
 
-GIF and TIFF detection reads a few header bytes. On a non-seekable stream those bytes are replayed; the rest of the file is not copied.
+GIF, TIFF, and WebP detection reads a few header bytes. On a non-seekable stream those bytes are replayed; the rest of the file is not copied.
 
 This library does not decide HTTP `Content-Length`, ASP.NET buffering, object-store caching, or where thumbnails are stored.
 
@@ -332,7 +421,7 @@ if (ImageTransforms.Capabilities.Encodes(ImageOutputFormat.Heic))
 
 `Heic` is true only when an embedded HEVC sample actually decodes. A libheif build can load AVIF and still have no HEVC decoder. `Avif` is the same idea with an AV1 sample. JPEG, PNG, WebP, GIF, and TIFF decode is reported from the loader operations.
 
-`Encodes` is the matching question for `ImageOutputFormat`. JPEG, PNG, WebP, GIF, and TIFF come from the save operation. AVIF and HEIC follow the same check: a probe image must encode, and the container brand must be that codec. The probe runs the first time `Capabilities` is read, not on the first `Render`.
+`Encodes` is the matching question for `ImageOutputFormat`. JPEG, PNG, WebP, GIF, and TIFF come from the save operation. AVIF and HEIC follow the same check: a probe image must encode, and the container brand must be that codec. The probe runs the first time `Capabilities` is read, not on the first `Run`.
 
 ## Local development
 
@@ -404,13 +493,13 @@ Copyright licenses and HEVC patents are different things. This README does not m
 
 **PhotoSauce MagicScaler** has the same product shape: a small, hard-to-misuse resize API with serious attention to orientation, quality, and metadata. Its best path is Windows WIC. This library makes the opposite runtime bet: libvips on Windows, macOS, and Linux, with HEIC left to the host instead of a bundled HEVC decoder.
 
-**Sharp** is the libvips API people already know (`contain`, `cover`, `fill`, gravity). It is Node. The resize here is the same set of outcomes: fit inside, zoom to the center or a focus box, or pad the gap.
+**Sharp** is the libvips API people already know (`contain`, `cover`, `fill`, gravity). It is Node. The Magick-style modes here are the same set of outcomes: `Pad` (contain, optional canvas), `Crop` (cover, optional focus), `Distort` (fill/stretch).
 
 ## Behavior notes
 
 - `netstandard2.1` is not a target. NetVips 3.2 targets `net6.0` and .NET Framework 4.6.2. Sibling ergonomics packages that still multi-target `netstandard2.1` cannot share this one.
 - Downscale goes through libvips thumbnail, which applies a mild sharpen and resizes in the image's gamma. There is no linear-light switch in this version.
-- A center zoom that may enlarge goes through libvips thumbnail. A center zoom that does not enlarge, an aspect-ratio zoom at the source size, and a zoom with a focus box decode the oriented image and then extract. Non-seekable streams take one decode.
+- A center crop that may enlarge goes through libvips thumbnail. A center crop that does not enlarge, an aspect-ratio crop at the source size, and a crop with a focus box decode the oriented image and then extract. Non-seekable streams take one decode.
 - A multiple of 90 degrees uses libvips' quarter-turn rotate. Any other angle resamples. `Trim` floors the centered rectangle, then keeps it one pixel inside that edge so the resampler does not mix the empty corners into the crop.
 - libvips prints EXIF strings with a suffix such as ` (value, ASCII, N components, N bytes)` when you read them back. That suffix is how libvips round-trips the field. The bytes are still the original text.
 - The HEIC integration fixture is a real HEVC still (`ftypheic` / `mif1` / `hvc1`, camera tag Sony DSLR-A550), not a file from an iPhone camera roll. iPhone photos often add a tile grid and an orientation tag. libheif reassembles grids before this library measures the image, but that container is not what the fixture covers. Drop a licensed iPhone capture in `test/fixtures` if you need that case locked.

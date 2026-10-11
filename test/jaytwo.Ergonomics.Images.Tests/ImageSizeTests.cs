@@ -22,7 +22,7 @@ public class ImageSizeTests
     {
         var output = Transform.Png(SampleImages.SolidPng(800, 400, 30, 140, 60), (source, destination) =>
         {
-            var size = ImageTransforms.Resize(source, destination, ImageOutputFormat.Png, ImageSize.Thumbnail);
+            var size = ImageTransforms.Resize(source, destination, ImageEncoding.Png(), ImageSize.Thumbnail);
             Assert.Equal(new ImageSize(256, 128), size);
         });
 
@@ -36,7 +36,7 @@ public class ImageSizeTests
     {
         var output = Transform.Png(SampleImages.SolidPng(100, 400, 30, 140, 60), (source, destination) =>
         {
-            var size = ImageTransforms.Resize(source, destination, new ImageResize(ImageOutputFormat.Png, ImageSize.S));
+            var size = ImageTransforms.Resize(source, destination, new ImageResize(ImageEncoding.Png(), ImageSize.S));
             Assert.Equal(new ImageSize(64, 256), size);
         });
 
@@ -50,7 +50,7 @@ public class ImageSizeTests
     {
         var output = Transform.Png(SampleImages.SolidPng(400, 200, 30, 140, 60), (source, destination) =>
         {
-            var size = ImageTransforms.Resize(source, destination, ImageOutputFormat.Png, new ImageSize(100, 100));
+            var size = ImageTransforms.Resize(source, destination, ImageEncoding.Png(), new ImageSize(100, 100));
             Assert.Equal(new ImageSize(100, 50), size);
         });
 
@@ -64,7 +64,7 @@ public class ImageSizeTests
     {
         var output = Transform.Png(SampleImages.SolidPng(40, 20, 30, 140, 60), (source, destination) =>
         {
-            var size = ImageTransforms.Resize(source, destination, ImageOutputFormat.Png, ImageSize.Preview, enlarge: false);
+            var size = ImageTransforms.Resize(source, destination, ImageEncoding.Png(), ImageSize.Preview, enlarge: false);
             Assert.Equal(new ImageSize(40, 20), size);
         });
 

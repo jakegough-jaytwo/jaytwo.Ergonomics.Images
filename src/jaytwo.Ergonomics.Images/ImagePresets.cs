@@ -8,16 +8,14 @@ public static class ImagePresets
     /// <summary>
     /// Fits inside a 256×256 frame and encodes WebP with the library defaults.
     /// </summary>
-    public static ImagePipeline Thumbnail { get; } = ImagePipeline.Create()
+    public static ImagePipeline ThumbnailWebP { get; } = ImagePipeline.Create()
         .Resize(ImageSize.Thumbnail)
-        .Fit(ImageFit.Fit)
         .EncodingWebP();
 
     /// <summary>
     /// Fits inside a 1024×1024 frame and encodes WebP with the library defaults.
     /// </summary>
-    public static ImagePipeline Preview { get; } = ImagePipeline.Create()
+    public static ImagePipeline PreviewWebP { get; } = ImagePipeline.Create()
         .Resize(ImageSize.Preview)
-        .Fit(ImageFit.Fit)
         .EncodingWebP();
 }

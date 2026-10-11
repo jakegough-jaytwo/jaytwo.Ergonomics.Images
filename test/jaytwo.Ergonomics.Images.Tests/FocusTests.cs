@@ -7,11 +7,11 @@ public class FocusTests
     [Fact]
     public void Zoom_focus_keeps_the_left_of_a_horizontal_image()
     {
-        var output = Transform.Png(SampleImages.HorizontalHalves(400, 200), (source, destination) => ImageTransforms.Resize(source, destination, new ImageResize(ImageOutputFormat.Png)
+        var output = Transform.Png(SampleImages.HorizontalHalves(400, 200), (source, destination) => ImageTransforms.Resize(source, destination, new ImageResize(ImageEncoding.Png())
         {
             Width = 100,
             Height = 200,
-            Fit = ImageFit.Zoom,
+            Mode = ResizeMode.Crop,
             Focus = new ImageFocus(0, 0, 0.25, 1),
         }));
 
@@ -25,11 +25,11 @@ public class FocusTests
     [Fact]
     public void Zoom_point_keeps_the_right_edge()
     {
-        var output = Transform.Png(SampleImages.HorizontalHalves(400, 200), (source, destination) => ImageTransforms.Resize(source, destination, new ImageResize(ImageOutputFormat.Png)
+        var output = Transform.Png(SampleImages.HorizontalHalves(400, 200), (source, destination) => ImageTransforms.Resize(source, destination, new ImageResize(ImageEncoding.Png())
         {
             Width = 100,
             Height = 200,
-            Fit = ImageFit.Zoom,
+            Mode = ResizeMode.Crop,
             Focus = ImageFocus.Point(1, 0.5),
         }));
 
@@ -43,11 +43,11 @@ public class FocusTests
     [Fact]
     public void Zoom_focus_keeps_the_top_of_a_vertical_image()
     {
-        var output = Transform.Png(SampleImages.VerticalHalves(200, 400), (source, destination) => ImageTransforms.Resize(source, destination, new ImageResize(ImageOutputFormat.Png)
+        var output = Transform.Png(SampleImages.VerticalHalves(200, 400), (source, destination) => ImageTransforms.Resize(source, destination, new ImageResize(ImageEncoding.Png())
         {
             Width = 200,
             Height = 100,
-            Fit = ImageFit.Zoom,
+            Mode = ResizeMode.Crop,
             Focus = new ImageFocus(0, 0, 1, 0.25),
         }));
 
@@ -61,12 +61,13 @@ public class FocusTests
     [Fact]
     public void Zoom_focus_upscales_the_anchored_window()
     {
-        var output = Transform.Png(SampleImages.HorizontalHalves(40, 20), (source, destination) => ImageTransforms.Resize(source, destination, new ImageResize(ImageOutputFormat.Png)
+        var output = Transform.Png(SampleImages.HorizontalHalves(40, 20), (source, destination) => ImageTransforms.Resize(source, destination, new ImageResize(ImageEncoding.Png())
         {
             Width = 80,
             Height = 80,
-            Fit = ImageFit.Zoom,
+            Mode = ResizeMode.Crop,
             Focus = ImageFocus.Point(0, 0.5),
+            Enlarge = true,
         }));
 
         using var image = DecodedImage.Open(output);
@@ -79,10 +80,10 @@ public class FocusTests
     [Fact]
     public void Zoom_to_square_moves_with_the_focus_box()
     {
-        var output = Transform.Png(SampleImages.HorizontalHalves(400, 200), (source, destination) => ImageTransforms.Resize(source, destination, new ImageResize(ImageOutputFormat.Png)
+        var output = Transform.Png(SampleImages.HorizontalHalves(400, 200), (source, destination) => ImageTransforms.Resize(source, destination, new ImageResize(ImageEncoding.Png())
         {
             Aspect = ImageAspectRatio.Square,
-            Fit = ImageFit.Zoom,
+            Mode = ResizeMode.Crop,
             Focus = new ImageFocus(0, 0, 0.25, 1),
         }));
 
@@ -96,11 +97,11 @@ public class FocusTests
     [Fact]
     public void Zoom_stops_at_a_focus_box_and_paints_the_gap()
     {
-        var output = Transform.Png(SampleImages.HorizontalHalves(400, 200), (source, destination) => ImageTransforms.Resize(source, destination, new ImageResize(ImageOutputFormat.Png)
+        var output = Transform.Png(SampleImages.HorizontalHalves(400, 200), (source, destination) => ImageTransforms.Resize(source, destination, new ImageResize(ImageEncoding.Png())
         {
             Width = 100,
             Height = 200,
-            Fit = ImageFit.Zoom,
+            Mode = ResizeMode.Crop,
             Focus = new ImageFocus(0, 0, 1, 1),
             Canvas = ImageCanvas.SolidBlack,
         }));
@@ -115,13 +116,38 @@ public class FocusTests
     }
 
     [Fact]
+    public void Crop_solid_canvas_underplates_when_focus_fits()
+    {
+        // Focus fits the cover window (no invented gap); solid must still show through
+        // preserved content alpha — same compositing as Pad / Expand / Checkered-on-Crop.
+        var output = Transform.Png(SampleImages.AlphaHalvesPng(40, 20), (source, destination) =>
+            ImageTransforms.Resize(source, destination, new ImageResize(ImageEncoding.Png())
+            {
+                Width = 40,
+                Height = 20,
+                Mode = ResizeMode.Crop,
+                Focus = ImageFocus.Point(0.25, 0.5),
+                Canvas = ImageCanvas.Solid(new ImageColor(0, 180, 0)),
+                SourceAlpha = AlphaBehavior.Preserve,
+            }));
+
+        using var image = DecodedImage.Open(output);
+        Assert.Equal(40, image.Width);
+        Assert.Equal(20, image.Height);
+        image.Near(10, 10, 20, 180, 40, tolerance: 2);
+        image.AlphaNear(10, 10, 255);
+        image.Near(30, 10, 0, 180, 0, tolerance: 2);
+        image.AlphaNear(30, 10, 255);
+    }
+
+    [Fact]
     public void Zoom_focus_gap_is_transparent_when_the_canvas_is_omitted()
     {
-        var output = Transform.Png(SampleImages.HorizontalHalves(80, 40), (source, destination) => ImageTransforms.Resize(source, destination, new ImageResize(ImageOutputFormat.Png)
+        var output = Transform.Png(SampleImages.HorizontalHalves(80, 40), (source, destination) => ImageTransforms.Resize(source, destination, new ImageResize(ImageEncoding.Png())
         {
             Width = 40,
             Height = 80,
-            Fit = ImageFit.Zoom,
+            Mode = ResizeMode.Crop,
             Focus = new ImageFocus(0, 0, 1, 1),
             Enlarge = false,
         }));
@@ -138,10 +164,10 @@ public class FocusTests
     [Fact]
     public void Zoom_to_square_pads_when_the_focus_box_is_the_whole_image()
     {
-        var output = Transform.Png(SampleImages.HorizontalHalves(400, 200), (source, destination) => ImageTransforms.Resize(source, destination, new ImageResize(ImageOutputFormat.Png)
+        var output = Transform.Png(SampleImages.HorizontalHalves(400, 200), (source, destination) => ImageTransforms.Resize(source, destination, new ImageResize(ImageEncoding.Png())
         {
             Aspect = ImageAspectRatio.Square,
-            Fit = ImageFit.Zoom,
+            Mode = ResizeMode.Crop,
             Focus = new ImageFocus(0, 0, 1, 1),
             Canvas = ImageCanvas.SolidWhite,
         }));
@@ -157,10 +183,11 @@ public class FocusTests
     [Fact]
     public void Box_zoom_uses_the_focus_box()
     {
-        var output = Transform.Png(SampleImages.HorizontalHalves(400, 200), (source, destination) => ImageTransforms.Resize(source, destination, new ImageResize(ImageOutputFormat.Png, ImageSize.S)
+        var output = Transform.Png(SampleImages.HorizontalHalves(400, 200), (source, destination) => ImageTransforms.Resize(source, destination, new ImageResize(ImageEncoding.Png(), ImageSize.S)
         {
-            Fit = ImageFit.Zoom,
+            Mode = ResizeMode.Crop,
             Focus = new ImageFocus(0, 0, 0.25, 1),
+            Enlarge = true,
         }));
 
         using var image = DecodedImage.Open(output);

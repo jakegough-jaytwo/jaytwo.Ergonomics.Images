@@ -58,11 +58,11 @@ public class CapabilityTests
         if (!ImageTransforms.Capabilities.Encodes(format))
         {
             Assert.Throws<ImageException>(() =>
-                ImageTransforms.Resize(source, destination, format, 32, 16, enlarge: false));
+                ImageTransforms.Resize(source, destination, EncodingFor(format), 32, 16, enlarge: false));
             return;
         }
 
-        var size = ImageTransforms.Resize(source, destination, format, 32, 16, enlarge: false);
+        var size = ImageTransforms.Resize(source, destination, EncodingFor(format), 32, 16, enlarge: false);
         Assert.Equal(new ImageSize(32, 16), size);
         if (!Decodes(format))
         {
@@ -72,6 +72,21 @@ public class CapabilityTests
         using var image = DecodedImage.Open(destination.ToArray());
         Assert.Equal(32, image.Width);
         Assert.Equal(16, image.Height);
+    }
+
+    private static ImageEncoding EncodingFor(ImageOutputFormat format)
+    {
+        return format switch
+        {
+            ImageOutputFormat.Jpeg => ImageEncoding.Jpeg(),
+            ImageOutputFormat.Png => ImageEncoding.Png(),
+            ImageOutputFormat.WebP => ImageEncoding.WebP(),
+            ImageOutputFormat.Avif => ImageEncoding.Avif(),
+            ImageOutputFormat.Gif => ImageEncoding.Gif(),
+            ImageOutputFormat.Tiff => ImageEncoding.Tiff(),
+            ImageOutputFormat.Heic => ImageEncoding.Heic(),
+            _ => throw new ArgumentOutOfRangeException(nameof(format)),
+        };
     }
 
     private static bool Decodes(ImageOutputFormat format)

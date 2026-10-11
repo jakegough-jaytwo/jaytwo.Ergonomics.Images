@@ -1,11 +1,28 @@
 namespace jaytwo.Ergonomics.Images;
 
 /// <summary>
-/// What happens to transparency that belongs to the source image.
+/// What happens to transparency that already belongs to the source pixels.
 /// </summary>
 /// <remarks>
-/// Applied after the resize, in output pixels, and before the image is placed on a canvas.
-/// <see cref="Checkerboard"/> paints an 8-pixel grid of white and gray under the source.
+/// <para>
+/// Source admission policy — the first of three alpha knobs. Set on <see cref="ImagePipeline.Create"/>
+/// via <see cref="ImagePipelineSource.SourceAlpha"/>, or on option bags such as
+/// <see cref="ImageResize.SourceAlpha"/>. Applied after auto-orient and before geometry.
+/// </para>
+/// <list type="bullet">
+/// <item>
+/// <see cref="Preserve"/> (default) leaves source holes as alpha into later stages.
+/// </item>
+/// <item>
+/// <see cref="Flatten"/> composites the source onto a color so geometry sees an opaque raster.
+/// </item>
+/// </list>
+/// <para>
+/// This is not <see cref="ImageCanvas"/> (the plate under pad gaps, crop-focus remainders, and
+/// expand corners — and, for solid/checkerboard plates, under preserved content alpha).
+/// This is not <see cref="ImageEncoding.JpegEncoding.AlphaFallbackColor"/> (last-resort flatten
+/// when the output format cannot store remaining alpha).
+/// </para>
 /// </remarks>
 public abstract record AlphaBehavior
 {
@@ -20,16 +37,7 @@ public abstract record AlphaBehavior
     /// <returns>A flatten onto <paramref name="color"/>.</returns>
     public static AlphaBehavior Flatten(ImageColor color) => new Flat(color);
 
-    /// <summary>Paints a white and gray checkerboard under source transparency.</summary>
-    /// <returns>The checkerboard behavior.</returns>
-    public static AlphaBehavior Checkerboard() => Grid.Instance;
-
     internal sealed record Keep : AlphaBehavior;
 
     internal sealed record Flat(ImageColor Color) : AlphaBehavior;
-
-    internal sealed record Grid : AlphaBehavior
-    {
-        internal static readonly Grid Instance = new();
-    }
 }

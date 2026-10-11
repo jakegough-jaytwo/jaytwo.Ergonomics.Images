@@ -3,7 +3,7 @@ using System;
 namespace jaytwo.Ergonomics.Images;
 
 /// <summary>
-/// A rectangle on the upright image that a <see cref="ImageFit.Zoom"/> window must keep.
+/// A rectangle on the upright image that a <see cref="ResizeMode.Crop"/> window must keep.
 /// </summary>
 /// <remarks>
 /// <see cref="X"/>, <see cref="Y"/>, <see cref="Width"/>, and <see cref="Height"/> are fractions of the image, from 0 to 1.

@@ -105,7 +105,7 @@ public class RotationTests
     public void Expand_can_paint_the_corners()
     {
         var output = Transform.Png(SampleImages.SolidPng(40, 20, 180, 30, 30), (source, destination) =>
-            ImageTransforms.Rotate(source, destination, new ImageRotate(ImageOutputFormat.Png)
+            ImageTransforms.Rotate(source, destination, new ImageRotate(ImageEncoding.Png())
             {
                 Rotation = ImageRotation.Clockwise(12),
                 Canvas = ImageCanvas.Solid(new ImageColor(0, 180, 0)),
@@ -114,17 +114,36 @@ public class RotationTests
         using var image = DecodedImage.Open(output);
         image.Near(0, 0, 0, 180, 0);
         image.Near(image.Width / 2, image.Height / 2, 180, 30, 30);
-        Assert.False(image.HasAlpha);
+        image.AlphaNear(0, 0, 255);
+    }
+
+    [Fact]
+    public void Expand_solid_canvas_underplates_preserved_content_alpha()
+    {
+        var output = Transform.Png(SampleImages.AlphaHalvesPng(40, 20), (source, destination) =>
+            ImageTransforms.Rotate(source, destination, new ImageRotate(ImageEncoding.Png())
+            {
+                Rotation = ImageRotation.Clockwise(12),
+                Canvas = ImageCanvas.Solid(new ImageColor(0, 180, 0)),
+                SourceAlpha = AlphaBehavior.Preserve,
+            }));
+
+        using var image = DecodedImage.Open(output);
+        image.Near(0, 0, 0, 180, 0);
+        image.AlphaNear(0, 0, 255);
+        image.Near((image.Width * 3) / 4, image.Height / 2, 0, 180, 0, tolerance: 2);
+        image.AlphaNear((image.Width * 3) / 4, image.Height / 2, 255);
+        image.Near(image.Width / 4, image.Height / 2, 20, 180, 40, tolerance: 2);
+        image.AlphaNear(image.Width / 4, image.Height / 2, 255);
     }
 
     [Fact]
     public void Jpeg_expand_flattens_transparent_corners_to_the_fallback()
     {
         var output = Transform.Run(SampleImages.SolidPng(40, 20, 180, 30, 30), (source, destination) =>
-            ImageTransforms.Rotate(source, destination, new ImageRotate(ImageOutputFormat.Jpeg)
+            ImageTransforms.Rotate(source, destination, new ImageRotate(ImageEncoding.Jpeg(95))
             {
                 Rotation = ImageRotation.Clockwise(12),
-                Encode = new ImageEncode { Quality = 95 },
             }));
 
         using var image = DecodedImage.Open(output);
@@ -134,12 +153,34 @@ public class RotationTests
     }
 
     [Fact]
+    public void Jpeg_expand_solid_canvas_uses_one_plate_for_corners_and_content_holes()
+    {
+        var output = Transform.Run(
+            SampleImages.AlphaHalvesPng(40, 20),
+            (source, destination) => ImageTransforms.Rotate(
+                source,
+                destination,
+                new ImageRotate(ImageEncoding.Jpeg(95, ImageColor.White))
+                {
+                    Rotation = ImageRotation.Clockwise(12),
+                    Canvas = ImageCanvas.SolidBlack,
+                    SourceAlpha = AlphaBehavior.Preserve,
+                }));
+
+        using var image = DecodedImage.Open(output);
+        Assert.False(image.HasAlpha);
+        image.Near(0, 0, 0, 0, 0);
+        image.Near((image.Width * 3) / 4, image.Height / 2, 0, 0, 0, tolerance: 2);
+        image.Near(image.Width / 4, image.Height / 2, 20, 180, 40, tolerance: 2);
+    }
+
+    [Fact]
     public void Trim_drops_the_generated_corners()
     {
         var source = SampleImages.SolidPng(40, 20, 180, 30, 30);
         var expanded = Render(source, ImageRotation.Clockwise(12));
         var trimmed = Transform.Png(source, (input, output) =>
-            ImageTransforms.Rotate(input, output, new ImageRotate(ImageOutputFormat.Png)
+            ImageTransforms.Rotate(input, output, new ImageRotate(ImageEncoding.Png())
             {
                 Rotation = ImageRotation.Clockwise(12),
                 Bounds = RotationBounds.Trim,
@@ -159,10 +200,37 @@ public class RotationTests
     }
 
     [Fact]
+    public void Trim_free_angle_corners_are_not_black_before_crop()
+    {
+        // Residual edge after inscribed crop must not be SolidBlack fill from the rotate.
+        var trimmed = Transform.Png(SampleImages.SolidPng(40, 20, 180, 30, 30), (input, output) =>
+            ImageTransforms.Rotate(input, output, new ImageRotate(ImageEncoding.Png())
+            {
+                Rotation = ImageRotation.Clockwise(33),
+                Bounds = RotationBounds.Trim,
+            }));
+
+        using var trim = DecodedImage.Open(trimmed);
+        Assert.True(trim.Width > 0);
+        Assert.True(trim.Height > 0);
+        for (var x = 0; x < trim.Width; x++)
+        {
+            trim.RejectOpaqueBlack(x, 0);
+            trim.RejectOpaqueBlack(x, trim.Height - 1);
+        }
+
+        for (var y = 0; y < trim.Height; y++)
+        {
+            trim.RejectOpaqueBlack(0, y);
+            trim.RejectOpaqueBlack(trim.Width - 1, y);
+        }
+    }
+
+    [Fact]
     public void Trim_aspect_stays_centered_inside_the_rotated_source()
     {
         var output = Transform.Png(SampleImages.SolidPng(80, 40, 180, 30, 30), (source, destination) =>
-            ImageTransforms.Rotate(source, destination, new ImageRotate(ImageOutputFormat.Png)
+            ImageTransforms.Rotate(source, destination, new ImageRotate(ImageEncoding.Png())
             {
                 Rotation = ImageRotation.Clockwise(15),
                 Bounds = RotationBounds.Trim,
@@ -182,7 +250,7 @@ public class RotationTests
     public void Zero_degree_trim_to_a_square_keeps_the_center()
     {
         var output = Transform.Png(SampleImages.HorizontalHalves(80, 40), (source, destination) =>
-            ImageTransforms.Rotate(source, destination, new ImageRotate(ImageOutputFormat.Png)
+            ImageTransforms.Rotate(source, destination, new ImageRotate(ImageEncoding.Png())
             {
                 Bounds = RotationBounds.Trim,
                 Aspect = ImageAspectRatio.Square,
@@ -200,14 +268,10 @@ public class RotationTests
     {
         var output = Transform.Run(
             SampleImages.HorizontalHalves(80, 40, orientation: 6, make: "jaytwo-cam"),
-            (source, destination) => ImageTransforms.Rotate(source, destination, new ImageRotate(ImageOutputFormat.Jpeg)
+            (source, destination) => ImageTransforms.Rotate(source, destination, new ImageRotate(
+                ImageEncoding.Jpeg(95) with { Metadata = MetadataPolicy.Preserve })
             {
                 Rotation = ImageRotation.Clockwise(90),
-                Encode = new ImageEncode
-                {
-                    Quality = 95,
-                    Metadata = MetadataPolicy.Preserve,
-                },
             }));
 
         using var image = DecodedImage.Open(output);
@@ -224,15 +288,11 @@ public class RotationTests
     {
         var output = Transform.Run(
             SampleImages.HorizontalHalves(80, 40, orientation: 6, make: "jaytwo-cam"),
-            (source, destination) => ImageTransforms.Rotate(source, destination, new ImageRotate(ImageOutputFormat.Jpeg)
+            (source, destination) => ImageTransforms.Rotate(source, destination, new ImageRotate(
+                ImageEncoding.Jpeg(95) with { Metadata = MetadataPolicy.Preserve })
             {
                 Rotation = ImageRotation.Clockwise(90),
-                Encode = new ImageEncode
-                {
-                    AutoOrient = false,
-                    Quality = 95,
-                    Metadata = MetadataPolicy.Preserve,
-                },
+                AutoOrient = false,
             }));
 
         using var image = DecodedImage.Open(output);
@@ -248,7 +308,7 @@ public class RotationTests
     public void Flatten_does_not_paint_the_expanded_corners()
     {
         var output = Transform.Png(SampleImages.AlphaHalvesPng(40, 20), (source, destination) =>
-            ImageTransforms.Rotate(source, destination, new ImageRotate(ImageOutputFormat.Png)
+            ImageTransforms.Rotate(source, destination, new ImageRotate(ImageEncoding.Png())
             {
                 Rotation = ImageRotation.Clockwise(12),
                 SourceAlpha = AlphaBehavior.Flatten(ImageColor.White),
@@ -265,7 +325,7 @@ public class RotationTests
         var bytes = SampleImages.HorizontalHalves(80, 40);
         using var source = new NonSeekableStream(new MemoryStream(bytes));
         using var destination = new MemoryStream();
-        var size = ImageTransforms.Rotate(source, destination, new ImageRotate(ImageOutputFormat.Png)
+        var size = ImageTransforms.Rotate(source, destination, new ImageRotate(ImageEncoding.Png())
         {
             Rotation = ImageRotation.Clockwise(12),
         });
@@ -287,7 +347,7 @@ public class RotationTests
     public void Expand_rejects_an_aspect_ratio()
     {
         Assert.Throws<ArgumentException>(() =>
-            ImageTransforms.Rotate(null!, null!, new ImageRotate(ImageOutputFormat.Png)
+            ImageTransforms.Rotate(null!, null!, new ImageRotate(ImageEncoding.Png())
             {
                 Rotation = ImageRotation.Clockwise(12),
                 Aspect = ImageAspectRatio.Square,
@@ -298,7 +358,7 @@ public class RotationTests
     public void Trim_rejects_a_canvas()
     {
         Assert.Throws<ArgumentException>(() =>
-            ImageTransforms.Rotate(null!, null!, new ImageRotate(ImageOutputFormat.Png)
+            ImageTransforms.Rotate(null!, null!, new ImageRotate(ImageEncoding.Png())
             {
                 Bounds = RotationBounds.Trim,
                 Canvas = ImageCanvas.SolidWhite,
@@ -308,7 +368,7 @@ public class RotationTests
     private static byte[] Render(byte[] source, ImageRotation rotation)
     {
         return Transform.Png(source, (input, output) =>
-            ImageTransforms.Rotate(input, output, new ImageRotate(ImageOutputFormat.Png)
+            ImageTransforms.Rotate(input, output, new ImageRotate(ImageEncoding.Png())
             {
                 Rotation = rotation,
             }));

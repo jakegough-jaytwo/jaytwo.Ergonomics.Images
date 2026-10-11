@@ -2,16 +2,16 @@ using Xunit;
 
 namespace jaytwo.Ergonomics.Images.Tests;
 
-public class ZoomTests
+public class CropModeTests
 {
     [Fact]
     public void Zoom_keeps_the_middle_of_a_horizontal_image()
     {
-        var output = Transform.Png(SampleImages.HorizontalHalves(400, 200), (source, destination) => ImageTransforms.Resize(source, destination, new ImageResize(ImageOutputFormat.Png)
+        var output = Transform.Png(SampleImages.HorizontalHalves(400, 200), (source, destination) => ImageTransforms.Resize(source, destination, new ImageResize(ImageEncoding.Png())
         {
             Width = 100,
             Height = 200,
-            Fit = ImageFit.Zoom,
+            Mode = ResizeMode.Crop,
         }));
 
         using var image = DecodedImage.Open(output);
@@ -24,11 +24,12 @@ public class ZoomTests
     [Fact]
     public void Zoom_upscales_to_the_exact_box()
     {
-        var output = Transform.Png(SampleImages.SolidJpeg(40, 20, 30, 140, 60), (source, destination) => ImageTransforms.Resize(source, destination, new ImageResize(ImageOutputFormat.Png)
+        var output = Transform.Png(SampleImages.SolidJpeg(40, 20, 30, 140, 60), (source, destination) => ImageTransforms.Resize(source, destination, new ImageResize(ImageEncoding.Png())
         {
             Width = 80,
             Height = 80,
-            Fit = ImageFit.Zoom,
+            Mode = ResizeMode.Crop,
+            Enlarge = true,
         }));
 
         using var image = DecodedImage.Open(output);
@@ -39,11 +40,11 @@ public class ZoomTests
     [Fact]
     public void Zoom_without_enlarge_keeps_the_center_aspect_window()
     {
-        var output = Transform.Png(SampleImages.HorizontalHalves(400, 200), (source, destination) => ImageTransforms.Resize(source, destination, new ImageResize(ImageOutputFormat.Png)
+        var output = Transform.Png(SampleImages.HorizontalHalves(400, 200), (source, destination) => ImageTransforms.Resize(source, destination, new ImageResize(ImageEncoding.Png())
         {
             Width = 200,
             Height = 200,
-            Fit = ImageFit.Zoom,
+            Mode = ResizeMode.Crop,
             Enlarge = false,
         }));
 

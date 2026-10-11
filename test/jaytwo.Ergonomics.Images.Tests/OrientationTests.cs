@@ -31,15 +31,10 @@ public class OrientationTests
             (source, destination) => ImageTransforms.Resize(
                 source,
                 destination,
-                ImageOutputFormat.Jpeg,
+                ImageEncoding.Jpeg(95) with { Metadata = MetadataPolicy.Preserve },
                 200,
                 200,
-                enlarge: false,
-                encode: new ImageEncode
-                {
-                    Quality = 95,
-                    Metadata = MetadataPolicy.Preserve,
-                }));
+                enlarge: false));
 
         using var image = DecodedImage.Open(output);
         Assert.Equal(width, image.Width);
@@ -68,15 +63,11 @@ public class OrientationTests
             (source, destination) => ImageTransforms.Resize(
                 source,
                 destination,
-                ImageOutputFormat.Jpeg,
-                200,
-                200,
-                enlarge: false,
-                encode: new ImageEncode
+                new ImageResize(ImageEncoding.Jpeg(95) with { Metadata = MetadataPolicy.Preserve })
                 {
+                    Width = 200,
+                    Height = 200,
                     AutoOrient = false,
-                    Quality = 95,
-                    Metadata = MetadataPolicy.Preserve,
                 }));
 
         using var image = DecodedImage.Open(output);

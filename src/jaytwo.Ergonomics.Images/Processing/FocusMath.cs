@@ -54,8 +54,8 @@ internal static class FocusMath
         var (spanTop, spanBottom) = Span(focusTop, focusBottom, sourceHeight);
         var spanWidth = spanRight - spanLeft;
         var spanHeight = spanBottom - spanTop;
-        var pad = spanWidth > cropWidth || spanHeight > cropHeight;
-        if (pad)
+        var underfillsFrame = spanWidth > cropWidth || spanHeight > cropHeight;
+        if (underfillsFrame)
         {
             (cropWidth, cropHeight) = BackOff(sourceWidth, sourceHeight, spanWidth, spanHeight, widthOverHeight);
         }
@@ -73,7 +73,7 @@ internal static class FocusMath
             spanTop,
             spanRight,
             spanBottom);
-        return new FocusWindow(left, top, cropWidth, cropHeight, pad);
+        return new FocusWindow(left, top, cropWidth, cropHeight, underfillsFrame);
     }
 
     private static (int Width, int Height) BackOff(
@@ -224,5 +224,6 @@ internal static class FocusMath
         return (left, right);
     }
 
-    internal readonly record struct FocusWindow(int Left, int Top, int Width, int Height, bool Pad);
+    // UnderfillsFrame: focus forced a larger window than cover, so Finish must paint the frame.
+    internal readonly record struct FocusWindow(int Left, int Top, int Width, int Height, bool UnderfillsFrame);
 }

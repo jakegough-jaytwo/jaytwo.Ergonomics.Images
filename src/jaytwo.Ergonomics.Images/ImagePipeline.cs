@@ -9,40 +9,67 @@ namespace jaytwo.Ergonomics.Images;
 /// A reusable, ordered image transform specification.
 /// </summary>
 /// <remarks>
-/// Fluent calls append or adjust stages without reading streams.
-/// Auto-orient runs first unless <see cref="ImageEncoding.AutoOrient"/> is false.
-/// <see cref="SourceAlpha"/> is a policy: its place in the chain does not change when it runs.
+/// Fluent calls append stages without reading streams.
+/// Source admission is configured on <see cref="Create"/>; resize and rotate options use the same
+/// lambda shape on <see cref="Resize(int?, int?, ResizeMode, Action{ImagePipelineResize})"/> and
+/// <see cref="Rotate(ImageRotation, Action{ImagePipelineRotate})"/>.
+/// Metadata and format options live on <see cref="Encoding"/>.
 /// Native stages share one libvips graph and encode once at <see cref="Run"/> or <see cref="RunAsync"/>.
-/// Start with <see cref="Create"/>, then chain stages:
-/// <c>ImagePipeline.Create().Rotate(...).Trim().Resize(...).Fit(ImageFit.Zoom).Encoding(ImageEncoding.WebP()).Run(...)</c>.
+/// Example:
+/// <c>ImagePipeline.Create().Resize(256, 256, ResizeMode.Crop, r => r.Focus(...)).EncodingWebP().Run(...)</c>.
 /// </remarks>
 public sealed class ImagePipeline
 {
     private static readonly ImagePipeline Empty = new(
         Array.Empty<PipelineOp>(),
         AlphaBehavior.Preserve,
+        autoOrient: true,
         encoding: null);
 
     private readonly PipelineOp[] _ops;
     private readonly AlphaBehavior _sourceAlpha;
+    private readonly bool _autoOrient;
     private readonly ImageEncoding? _encoding;
 
     private ImagePipeline(
         PipelineOp[] ops,
         AlphaBehavior sourceAlpha,
+        bool autoOrient,
         ImageEncoding? encoding)
     {
         _ops = ops;
         _sourceAlpha = sourceAlpha;
+        _autoOrient = autoOrient;
         _encoding = encoding;
     }
 
-    /// <summary>Starts an empty reusable pipeline. Auto-orient still runs as a preamble at <see cref="Run"/>.</summary>
-    /// <returns>A pipeline with no stages yet.</returns>
-    public static ImagePipeline Create() => Empty;
+    /// <summary>
+    /// Starts a reusable pipeline. Auto-orient still runs as a preamble at <see cref="Run"/> unless turned off.
+    /// </summary>
+    /// <param name="configure">
+    /// Optional source admission (<see cref="ImagePipelineSource.AutoOrient"/>,
+    /// <see cref="ImagePipelineSource.SourceAlpha"/>).
+    /// Omit it to auto-orient and preserve source transparency.
+    /// </param>
+    /// <returns>A pipeline with no geometry stages yet.</returns>
+    public static ImagePipeline Create(Action<ImagePipelineSource>? configure = null)
+    {
+        if (configure is null)
+        {
+            return Empty;
+        }
+
+        var source = new ImagePipelineSource();
+        configure(source);
+        return new ImagePipeline(
+            Array.Empty<PipelineOp>(),
+            source.Behavior,
+            source.AutoOrientEnabled,
+            encoding: null);
+    }
 
     /// <summary>Starts from a preset pipeline built from the same primitives.</summary>
-    /// <param name="preset">A pipeline such as <see cref="ImagePresets.Thumbnail"/>.</param>
+    /// <param name="preset">A pipeline such as <see cref="ImagePresets.ThumbnailWebP"/>.</param>
     /// <returns><paramref name="preset"/>.</returns>
     public static ImagePipeline Preset(ImagePipeline preset)
     {
@@ -54,42 +81,87 @@ public sealed class ImagePipeline
         return preset;
     }
 
-    /// <summary>Appends a caller rotation after auto-orient. Bounds default to <see cref="RotationBounds.Expand"/>.</summary>
+    /// <summary>
+    /// Appends a caller rotation after auto-orient. Bounds default to <see cref="RotationBounds.Expand"/>.
+    /// </summary>
     /// <param name="rotation">The turn in degrees.</param>
+    /// <param name="configure">
+    /// Optional bounds and plate (<see cref="ImagePipelineRotate.Trim"/>,
+    /// <see cref="ImagePipelineRotate.Expand"/>, <see cref="ImagePipelineRotate.Aspect"/>,
+    /// <see cref="ImagePipelineRotate.Canvas"/>).
+    /// </param>
     /// <returns>A pipeline that includes the rotation.</returns>
-    public ImagePipeline Rotate(ImageRotation rotation)
+    public ImagePipeline Rotate(ImageRotation rotation, Action<ImagePipelineRotate>? configure = null)
     {
-        return Append(new PipelineOp.RotateOp(rotation, RotationBounds.Expand, Aspect: null, Canvas: null));
+        var options = new ImagePipelineRotate();
+        configure?.Invoke(options);
+        var op = new PipelineOp.RotateOp(
+            rotation,
+            options.Bounds,
+            options.AspectRatio,
+            options.CanvasPlate);
+        ValidateRotate(op);
+        return Append(op);
     }
 
-    /// <summary>Sets the preceding rotation to <see cref="RotationBounds.Expand"/>.</summary>
-    /// <returns>A pipeline with expand bounds on the last rotation.</returns>
-    public ImagePipeline Expand() => PatchLastRotate((rotate) => rotate with
+    /// <summary>
+    /// Appends an explicit crop of a relative rectangle on the upright image.
+    /// </summary>
+    /// <param name="x">Left edge, as a fraction of the width.</param>
+    /// <param name="y">Top edge, as a fraction of the height.</param>
+    /// <param name="width">Width, as a fraction of the image width.</param>
+    /// <param name="height">Height, as a fraction of the image height.</param>
+    /// <returns>A pipeline that includes the crop.</returns>
+    /// <remarks>
+    /// Coordinates match <see cref="ImageFocus"/>: fractions from 0 to 1, origin at the top left, after auto-orient.
+    /// The box must stay inside the image and have positive area. This extracts that rectangle; it is not
+    /// <see cref="ResizeMode.Crop"/> (scale-to-fill and discard overflow).
+    /// </remarks>
+    public ImagePipeline Crop(double x, double y, double width, double height)
     {
-        Bounds = RotationBounds.Expand,
-        Aspect = null,
-    });
+        (x, y, width, height) = CropRect.Normalize(x, y, width, height);
+        return Append(new PipelineOp.CropOp(x, y, width, height));
+    }
 
-    /// <summary>Sets the preceding rotation to <see cref="RotationBounds.Trim"/>.</summary>
-    /// <param name="aspect">Optional ratio of the centered trim rectangle.</param>
-    /// <returns>A pipeline with trim bounds on the last rotation.</returns>
-    public ImagePipeline Trim(ImageAspectRatio? aspect = null) => PatchLastRotate((rotate) => rotate with
-    {
-        Bounds = RotationBounds.Trim,
-        Aspect = aspect,
-        Canvas = null,
-    });
-
-    /// <summary>Appends a resize frame. Mode defaults to <see cref="ImageFit.Fit"/> until <see cref="Fit"/> is called.</summary>
+    /// <summary>Appends a resize frame. Mode defaults to <see cref="ResizeMode.Pad"/>.</summary>
     /// <param name="size">Width and height of the frame.</param>
+    /// <param name="mode">How the source meets the frame. Pass <see cref="ResizeMode.Crop"/> when using Focus.</param>
+    /// <param name="configure">
+    /// Optional aspect, focus, enlarge, and canvas (<see cref="ImagePipelineResize"/>).
+    /// </param>
     /// <returns>A pipeline that includes the resize.</returns>
-    public ImagePipeline Resize(ImageSize size) => Resize(size.Width, size.Height);
+    /// <remarks>
+    /// There is no <c>Resize(ImageSize, Action)</c> overload that forces Pad: Focus and other
+    /// mode-specific options require an explicit <paramref name="mode"/>.
+    /// </remarks>
+    public ImagePipeline Resize(
+        ImageSize size,
+        ResizeMode mode = ResizeMode.Pad,
+        Action<ImagePipelineResize>? configure = null)
+        => Resize(size.Width, size.Height, mode, configure);
+
+    /// <summary>Appends a resize frame with <see cref="ResizeMode.Pad"/> and the given options.</summary>
+    /// <param name="width">Requested width in pixels.</param>
+    /// <param name="height">Requested height in pixels.</param>
+    /// <param name="configure">Aspect, focus, enlarge, and/or canvas for this resize.</param>
+    /// <returns>A pipeline that includes the resize.</returns>
+    public ImagePipeline Resize(int? width, int? height, Action<ImagePipelineResize> configure)
+        => Resize(width, height, ResizeMode.Pad, configure);
 
     /// <summary>Appends a resize frame.</summary>
     /// <param name="width">Requested width in pixels.</param>
     /// <param name="height">Requested height in pixels.</param>
+    /// <param name="mode">How the source meets the frame. Defaults to <see cref="ResizeMode.Pad"/>.</param>
+    /// <param name="configure">
+    /// Optional aspect, focus, enlarge, and canvas (<see cref="ImagePipelineResize"/>).
+    /// Omit it for a plain pad/crop/distort with library defaults.
+    /// </param>
     /// <returns>A pipeline that includes the resize.</returns>
-    public ImagePipeline Resize(int? width = null, int? height = null)
+    public ImagePipeline Resize(
+        int? width = null,
+        int? height = null,
+        ResizeMode mode = ResizeMode.Pad,
+        Action<ImagePipelineResize>? configure = null)
     {
         if (width is <= 0)
         {
@@ -101,95 +173,37 @@ public sealed class ImagePipeline
             throw new ArgumentOutOfRangeException(nameof(height), "Height must be positive.");
         }
 
-        return Append(new PipelineOp.ResizeOp(
-            width,
-            height,
-            Aspect: null,
-            ImageFit.Fit,
-            Focus: null,
-            Canvas: null,
-            Enlarge: true));
-    }
-
-    /// <summary>Sets how the preceding resize meets its frame.</summary>
-    /// <param name="fit">Fit, zoom, or stretch.</param>
-    /// <returns>A pipeline with that mode on the last resize.</returns>
-    public ImagePipeline Fit(ImageFit fit)
-    {
-        if (!Enum.IsDefined(typeof(ImageFit), fit))
+        if (!Enum.IsDefined(typeof(ResizeMode), mode))
         {
-            throw new ArgumentOutOfRangeException(nameof(fit), "Fit is not a known value.");
+            throw new ArgumentOutOfRangeException(nameof(mode), "Mode is not a known value.");
         }
 
-        return PatchLastResize((resize) => resize with { Fit = fit });
-    }
+        var options = new ImagePipelineResize();
+        configure?.Invoke(options);
 
-    /// <summary>Sets the output ratio on the preceding resize.</summary>
-    /// <param name="aspect">Width over height.</param>
-    /// <returns>A pipeline with that aspect on the last resize.</returns>
-    public ImagePipeline Aspect(ImageAspectRatio aspect)
-    {
-        if (!aspect.IsInRange())
-        {
-            throw new ArgumentOutOfRangeException(nameof(aspect), "Aspect ratio must be finite and positive.");
-        }
+        // Resolve FitInside's both-sides+aspect and clears NativeAspect; reject Distort first.
+        RejectDistortBoxWithAspect(mode, width, height, options.AspectRatio);
 
-        return PatchLastResize((resize) => resize with { Aspect = aspect });
-    }
+        var frame = options.AspectRatio is ImageAspectRatio aspect
+            ? ImageTransforms.Resolve(width, height, aspect)
+            : new ImageTransforms.Frame(width, height, null);
 
-    /// <summary>Sets the relative focus rectangle for a preceding <see cref="ImageFit.Zoom"/>.</summary>
-    /// <param name="focus">Rectangle on the upright image, edges from 0 to 1.</param>
-    /// <returns>A pipeline with that focus on the last resize.</returns>
-    public ImagePipeline Focus(ImageFocus focus) => PatchLastResize((resize) => resize with { Focus = focus });
-
-    /// <summary>Sets whether the preceding resize may enlarge the source.</summary>
-    /// <param name="enlarge">True to allow upscaling.</param>
-    /// <returns>A pipeline with that enlarge flag on the last resize.</returns>
-    public ImagePipeline Enlarge(bool enlarge) => PatchLastResize((resize) => resize with { Enlarge = enlarge });
-
-    /// <summary>
-    /// Sets the canvas for the preceding fit resize, zoom focus gap, or expanded rotation.
-    /// </summary>
-    /// <param name="canvas">Solid color or transparent gap.</param>
-    /// <returns>A pipeline with that canvas on the last compatible stage.</returns>
-    public ImagePipeline Canvas(ImageCanvas canvas)
-    {
-        if (canvas is null)
-        {
-            throw new ArgumentNullException(nameof(canvas));
-        }
-
-        for (var i = _ops.Length - 1; i >= 0; i--)
-        {
-            if (_ops[i] is PipelineOp.ResizeOp resize)
-            {
-                return ReplaceAt(i, resize with { Canvas = canvas });
-            }
-
-            if (_ops[i] is PipelineOp.RotateOp rotate)
-            {
-                return ReplaceAt(i, rotate with { Canvas = canvas, Bounds = RotationBounds.Expand, Aspect = null });
-            }
-        }
-
-        throw new InvalidOperationException("Canvas needs a preceding Resize or Rotate.");
-    }
-
-    /// <summary>Sets how source transparency is resolved. Last call wins; chain position does not change timing.</summary>
-    /// <param name="sourceAlpha">Preserve, flatten, or checkerboard.</param>
-    /// <returns>A pipeline with that source-alpha policy.</returns>
-    public ImagePipeline SourceAlpha(AlphaBehavior sourceAlpha)
-    {
-        if (sourceAlpha is null)
-        {
-            throw new ArgumentNullException(nameof(sourceAlpha));
-        }
-
-        return new ImagePipeline(_ops, sourceAlpha, _encoding);
+        // Distort always writes the requested size via Size.Force; enlarge does not apply.
+        var enlarge = mode != ResizeMode.Distort && options.EnlargeEnabled;
+        var op = new PipelineOp.ResizeOp(
+            frame.Width,
+            frame.Height,
+            frame.NativeAspect,
+            mode,
+            options.FocusBox,
+            options.CanvasPlate,
+            enlarge);
+        ValidateResize(op);
+        return Append(op);
     }
 
     /// <summary>Sets the configured output encoding. Each format exposes only its valid options.</summary>
-    /// <param name="encoding">Format-specific encoding, such as <see cref="ImageEncoding.WebP"/>.</param>
+    /// <param name="encoding">Format-specific encoding, such as <see cref="ImageEncoding.Jpeg"/>.</param>
     /// <returns>A pipeline that encodes with <paramref name="encoding"/>.</returns>
     public ImagePipeline Encoding(ImageEncoding encoding)
     {
@@ -199,29 +213,42 @@ public sealed class ImagePipeline
         }
 
         encoding.Validate();
-        return new ImagePipeline(_ops, _sourceAlpha, encoding);
+        return new ImagePipeline(_ops, _sourceAlpha, _autoOrient, encoding);
     }
 
     /// <summary>Encodes JPEG at <paramref name="quality"/>.</summary>
-    /// <param name="quality">Lossy quality from 1 to 100. Defaults to 80.</param>
+    /// <param name="quality">Lossy quality from 1 to 100. Defaults to <see cref="ImageEncoding.DefaultJpegQuality"/>.</param>
     /// <param name="alphaFallbackColor">Flatten color when alpha remains. Defaults to white.</param>
     /// <returns>A pipeline that encodes JPEG.</returns>
-    public ImagePipeline EncodingJpeg(int quality = 80, ImageColor? alphaFallbackColor = null)
+    public ImagePipeline EncodingJpeg(int quality = ImageEncoding.DefaultJpegQuality, ImageColor? alphaFallbackColor = null)
         => Encoding(ImageEncoding.Jpeg(quality, alphaFallbackColor));
 
     /// <summary>Encodes PNG.</summary>
     /// <returns>A pipeline that encodes PNG.</returns>
     public ImagePipeline EncodingPng() => Encoding(ImageEncoding.Png());
 
-    /// <summary>Encodes WebP at <paramref name="quality"/>.</summary>
-    /// <param name="quality">Lossy quality from 1 to 100. Defaults to 60.</param>
+    /// <summary>Encodes lossy WebP at <paramref name="quality"/>.</summary>
+    /// <param name="quality">Lossy quality from 1 to 100. Defaults to <see cref="ImageEncoding.DefaultWebPQuality"/>.</param>
     /// <returns>A pipeline that encodes WebP.</returns>
-    public ImagePipeline EncodingWebP(int quality = 60) => Encoding(ImageEncoding.WebP(quality));
+    public ImagePipeline EncodingWebP(int quality = ImageEncoding.DefaultWebPQuality) => Encoding(ImageEncoding.WebP(quality));
+
+    /// <summary>Encodes WebP with the given compression (lossy quality or lossless).</summary>
+    /// <param name="compression">Lossy or lossless.</param>
+    /// <returns>A pipeline that encodes WebP.</returns>
+    public ImagePipeline EncodingWebP(WebPCompression compression)
+    {
+        if (compression is null)
+        {
+            throw new ArgumentNullException(nameof(compression));
+        }
+
+        return Encoding(ImageEncoding.WebP(compression));
+    }
 
     /// <summary>Encodes AVIF at <paramref name="quality"/>.</summary>
-    /// <param name="quality">Lossy quality from 1 to 100. Defaults to 85.</param>
+    /// <param name="quality">Lossy quality from 1 to 100. Defaults to <see cref="ImageEncoding.DefaultAvifQuality"/>.</param>
     /// <returns>A pipeline that encodes AVIF.</returns>
-    public ImagePipeline EncodingAvif(int quality = 85) => Encoding(ImageEncoding.Avif(quality));
+    public ImagePipeline EncodingAvif(int quality = ImageEncoding.DefaultAvifQuality) => Encoding(ImageEncoding.Avif(quality));
 
     /// <summary>Encodes GIF.</summary>
     /// <returns>A pipeline that encodes GIF.</returns>
@@ -232,9 +259,9 @@ public sealed class ImagePipeline
     public ImagePipeline EncodingTiff() => Encoding(ImageEncoding.Tiff());
 
     /// <summary>Encodes HEIC at <paramref name="quality"/>.</summary>
-    /// <param name="quality">Lossy quality from 1 to 100. Defaults to 85.</param>
+    /// <param name="quality">Lossy quality from 1 to 100. Defaults to <see cref="ImageEncoding.DefaultHeicQuality"/>.</param>
     /// <returns>A pipeline that encodes HEIC.</returns>
-    public ImagePipeline EncodingHeic(int quality = 85) => Encoding(ImageEncoding.Heic(quality));
+    public ImagePipeline EncodingHeic(int quality = ImageEncoding.DefaultHeicQuality) => Encoding(ImageEncoding.Heic(quality));
 
     /// <summary>
     /// Runs the pipeline: decode, auto-orient, ordered native stages, encode once.
@@ -251,7 +278,7 @@ public sealed class ImagePipeline
 
         Validate();
         RequireStreams(source, destination);
-        return ImageEngine.ExecutePipeline(source, destination, _ops, _sourceAlpha, _encoding);
+        return ImageEngine.ExecutePipeline(source, destination, _ops, _sourceAlpha, _autoOrient, _encoding);
     }
 
     /// <summary>
@@ -278,7 +305,14 @@ public sealed class ImagePipeline
 
         Validate();
         RequireStreams(source, destination);
-        return AsyncStreamBridge.RunAsync(source, destination, _ops, _sourceAlpha, _encoding, cancellationToken);
+        return AsyncStreamBridge.RunAsync(
+            source,
+            destination,
+            _ops,
+            _sourceAlpha,
+            _autoOrient,
+            _encoding,
+            cancellationToken);
     }
 
     internal static ImagePipeline FromResize(ImageResize resize)
@@ -288,32 +322,34 @@ public sealed class ImagePipeline
             throw new ArgumentNullException(nameof(resize));
         }
 
+        // Same order as Resize: reject Distort+box+aspect before Resolve clears aspect.
+        RejectDistortBoxWithAspect(resize.Mode, resize.Width, resize.Height, resize.Aspect);
+
         var frame = ImageTransforms.Resolve(resize);
-        var pipeline = Empty.Resize(frame.Width, frame.Height);
-        if (frame.NativeAspect is ImageAspectRatio aspect)
-        {
-            pipeline = pipeline.Aspect(aspect);
-        }
+        return Create(s => s.AutoOrient(resize.AutoOrient).SourceAlpha(resize.SourceAlpha))
+            .Resize(frame.Width, frame.Height, resize.Mode, r =>
+            {
+                if (frame.NativeAspect is ImageAspectRatio aspect)
+                {
+                    r.Aspect(aspect);
+                }
 
-        pipeline = pipeline.Fit(resize.Fit);
-        if (resize.Focus is ImageFocus focus)
-        {
-            pipeline = pipeline.Focus(focus);
-        }
+                if (resize.Focus is ImageFocus focus)
+                {
+                    r.Focus(focus);
+                }
 
-        if (resize.Canvas is ImageCanvas canvas)
-        {
-            pipeline = pipeline.Canvas(canvas);
-        }
+                if (resize.Canvas is ImageCanvas canvas)
+                {
+                    r.Canvas(canvas);
+                }
 
-        if (!resize.Enlarge)
-        {
-            pipeline = pipeline.Enlarge(false);
-        }
-
-        return pipeline
-            .SourceAlpha(resize.SourceAlpha)
-            .Encoding(ImageEncoding.From(resize.Format, resize.Encode));
+                if (resize.Mode != ResizeMode.Distort && resize.Enlarge)
+                {
+                    r.Enlarge(true);
+                }
+            })
+            .Encoding(resize.Encoding);
     }
 
     internal static ImagePipeline FromRotate(ImageRotate rotate)
@@ -323,18 +359,41 @@ public sealed class ImagePipeline
             throw new ArgumentNullException(nameof(rotate));
         }
 
-        // Keep the caller's combination intact so Run validation can reject Expand+Aspect / Trim+Canvas.
-        var pipeline = new ImagePipeline(
-            new PipelineOp[]
+        return Create(s => s.AutoOrient(rotate.AutoOrient).SourceAlpha(rotate.SourceAlpha))
+            .Rotate(rotate.Rotation, r =>
             {
-                new PipelineOp.RotateOp(rotate.Rotation, rotate.Bounds, rotate.Aspect, rotate.Canvas),
-            },
-            AlphaBehavior.Preserve,
-            encoding: null);
+                if (rotate.Bounds == RotationBounds.Trim)
+                {
+                    r.Trim(rotate.Aspect);
+                }
+                else
+                {
+                    r.Expand();
+                    if (rotate.Aspect is ImageAspectRatio aspect)
+                    {
+                        // Surface Expand+Aspect as the same failure Trim requires.
+                        r.Aspect(aspect);
+                    }
+                }
 
-        return pipeline
-            .SourceAlpha(rotate.SourceAlpha)
-            .Encoding(ImageEncoding.From(rotate.Format, rotate.Encode));
+                if (rotate.Canvas is ImageCanvas canvas)
+                {
+                    r.Canvas(canvas);
+                }
+            })
+            .Encoding(rotate.Encoding);
+    }
+
+    internal static ImagePipeline FromCrop(ImageCrop crop)
+    {
+        if (crop is null)
+        {
+            throw new ArgumentNullException(nameof(crop));
+        }
+
+        return Create(s => s.AutoOrient(crop.AutoOrient).SourceAlpha(crop.SourceAlpha))
+            .Crop(crop.X, crop.Y, crop.Width, crop.Height)
+            .Encoding(crop.Encoding);
     }
 
     private static void ValidateRotate(PipelineOp.RotateOp rotate)
@@ -372,14 +431,14 @@ public sealed class ImagePipeline
             throw new ArgumentOutOfRangeException(nameof(resize), "Height must be positive.");
         }
 
-        if (!Enum.IsDefined(typeof(ImageFit), resize.Fit))
+        if (!Enum.IsDefined(typeof(ResizeMode), resize.Mode))
         {
-            throw new ArgumentOutOfRangeException(nameof(resize), "Fit is not a known value.");
+            throw new ArgumentOutOfRangeException(nameof(resize), "Mode is not a known value.");
         }
 
-        if (resize.Focus is not null && resize.Fit != ImageFit.Zoom)
+        if (resize.Focus is not null && resize.Mode != ResizeMode.Crop)
         {
-            throw new ArgumentException("A focus box applies with Zoom.", nameof(resize));
+            throw new ArgumentException("A focus box applies with ResizeMode.Crop.", nameof(resize));
         }
 
         if (resize.Aspect is ImageAspectRatio aspect && !aspect.IsInRange())
@@ -392,9 +451,9 @@ public sealed class ImagePipeline
         var hasAspect = resize.Aspect is not null;
         var hasCanvas = resize.Canvas is not null;
 
-        switch (resize.Fit)
+        switch (resize.Mode)
         {
-            case ImageFit.Fit:
+            case ResizeMode.Pad:
                 if (hasCanvas && !hasAspect && (!hasWidth || !hasHeight))
                 {
                     throw new ArgumentException("A canvas needs a width and a height, or an aspect ratio.", nameof(resize));
@@ -402,46 +461,60 @@ public sealed class ImagePipeline
 
                 if (!hasCanvas && hasAspect && !hasWidth && !hasHeight)
                 {
-                    throw new ArgumentException("Fit to an aspect ratio needs a canvas or a pixel size.", nameof(resize));
+                    throw new ArgumentException("Pad to an aspect ratio needs a canvas or a pixel size.", nameof(resize));
                 }
 
                 break;
 
-            case ImageFit.Zoom:
+            case ResizeMode.Crop:
                 if (hasCanvas && resize.Focus is null)
                 {
-                    throw new ArgumentException("A canvas applies with Fit.", nameof(resize));
+                    throw new ArgumentException(
+                        "On Crop, a canvas needs a Focus box for the uncovered gap (or use Pad).",
+                        nameof(resize));
                 }
 
                 if (!hasAspect && (!hasWidth || !hasHeight))
                 {
-                    throw new ArgumentException("Zoom needs a width and a height, or an aspect ratio.", nameof(resize));
+                    throw new ArgumentException("Crop needs a width and a height, or an aspect ratio.", nameof(resize));
                 }
 
                 break;
 
-            case ImageFit.Stretch:
-                if (!resize.Enlarge)
-                {
-                    throw new ArgumentException("Stretch writes the requested size.", nameof(resize));
-                }
-
+            case ResizeMode.Distort:
                 if (hasCanvas)
                 {
-                    throw new ArgumentException("A canvas applies with Fit.", nameof(resize));
+                    throw new ArgumentException(
+                        "A canvas applies with Pad, or with Crop when Focus is set.",
+                        nameof(resize));
                 }
 
-                if (hasWidth && hasHeight && hasAspect)
-                {
-                    throw new ArgumentException("Stretch uses the width and height as the exact size.", nameof(resize));
-                }
+                RejectDistortBoxWithAspect(resize.Mode, resize.Width, resize.Height, resize.Aspect);
 
                 if (!HasExactSize(hasWidth, hasHeight, hasAspect))
                 {
-                    throw new ArgumentException("Stretch needs a width and a height.", nameof(resize));
+                    throw new ArgumentException(
+                        "Distort needs a width and a height, or an aspect ratio and one side.",
+                        nameof(resize));
                 }
 
                 break;
+        }
+    }
+
+    /// <summary>
+    /// Distort takes an exact pixel box, or one side plus an aspect. Both sides plus an aspect
+    /// must be rejected before frame resolve FitInside clears the aspect.
+    /// </summary>
+    private static void RejectDistortBoxWithAspect(
+        ResizeMode mode,
+        int? width,
+        int? height,
+        ImageAspectRatio? aspect)
+    {
+        if (mode == ResizeMode.Distort && width is not null && height is not null && aspect is not null)
+        {
+            throw new ArgumentException("Distort uses the width and height as the exact size.");
         }
     }
 
@@ -483,41 +556,7 @@ public sealed class ImagePipeline
         var next = new PipelineOp[_ops.Length + 1];
         Array.Copy(_ops, next, _ops.Length);
         next[_ops.Length] = op;
-        return new ImagePipeline(next, _sourceAlpha, _encoding);
-    }
-
-    private ImagePipeline ReplaceAt(int index, PipelineOp op)
-    {
-        var next = new PipelineOp[_ops.Length];
-        Array.Copy(_ops, next, _ops.Length);
-        next[index] = op;
-        return new ImagePipeline(next, _sourceAlpha, _encoding);
-    }
-
-    private ImagePipeline PatchLastRotate(Func<PipelineOp.RotateOp, PipelineOp.RotateOp> patch)
-    {
-        for (var i = _ops.Length - 1; i >= 0; i--)
-        {
-            if (_ops[i] is PipelineOp.RotateOp rotate)
-            {
-                return ReplaceAt(i, patch(rotate));
-            }
-        }
-
-        throw new InvalidOperationException("Trim or Expand needs a preceding Rotate.");
-    }
-
-    private ImagePipeline PatchLastResize(Func<PipelineOp.ResizeOp, PipelineOp.ResizeOp> patch)
-    {
-        for (var i = _ops.Length - 1; i >= 0; i--)
-        {
-            if (_ops[i] is PipelineOp.ResizeOp resize)
-            {
-                return ReplaceAt(i, patch(resize));
-            }
-        }
-
-        throw new InvalidOperationException("This adjustment needs a preceding Resize.");
+        return new ImagePipeline(next, _sourceAlpha, _autoOrient, _encoding);
     }
 
     private void Validate()
@@ -531,6 +570,9 @@ public sealed class ImagePipeline
                     break;
                 case PipelineOp.ResizeOp resize:
                     ValidateResize(resize);
+                    break;
+                case PipelineOp.CropOp crop:
+                    CropRect.Normalize(crop.X, crop.Y, crop.Width, crop.Height);
                     break;
             }
         }

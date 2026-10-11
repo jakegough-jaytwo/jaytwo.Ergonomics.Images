@@ -1,13 +1,14 @@
+using System;
 using Xunit;
 
 namespace jaytwo.Ergonomics.Images.Tests;
 
-public class FitFillTests
+public class PadCanvasTests
 {
     [Fact]
     public void Color_letterboxes_a_landscape_image()
     {
-        var output = Transform.Png(SampleImages.SolidJpeg(400, 200, 30, 140, 60), (source, destination) => ImageTransforms.Resize(source, destination, new ImageResize(ImageOutputFormat.Png)
+        var output = Transform.Png(SampleImages.SolidJpeg(400, 200, 30, 140, 60), (source, destination) => ImageTransforms.Resize(source, destination, new ImageResize(ImageEncoding.Png())
         {
             Width = 100,
             Height = 100,
@@ -25,7 +26,7 @@ public class FitFillTests
     [Fact]
     public void Color_pillarboxes_a_portrait_image()
     {
-        var output = Transform.Png(SampleImages.SolidJpeg(200, 400, 30, 140, 60), (source, destination) => ImageTransforms.Resize(source, destination, new ImageResize(ImageOutputFormat.Png)
+        var output = Transform.Png(SampleImages.SolidJpeg(200, 400, 30, 140, 60), (source, destination) => ImageTransforms.Resize(source, destination, new ImageResize(ImageEncoding.Png())
         {
             Width = 100,
             Height = 100,
@@ -43,15 +44,11 @@ public class FitFillTests
     [Fact]
     public void Color_argument_paints_the_bars()
     {
-        var output = Transform.Png(SampleImages.SolidJpeg(400, 200, 30, 140, 60), (source, destination) => ImageTransforms.Resize(source, destination, new ImageResize(ImageOutputFormat.Png)
+        var output = Transform.Png(SampleImages.SolidJpeg(400, 200, 30, 140, 60), (source, destination) => ImageTransforms.Resize(source, destination, new ImageResize(ImageEncoding.Png())
         {
             Width = 100,
             Height = 100,
             Canvas = ImageCanvas.Solid(new ImageColor(10, 20, 30)),
-            Encode = new ImageEncode
-            {
-                AlphaFallbackColor = ImageColor.Black,
-            },
         }));
 
         using var image = DecodedImage.Open(output);
@@ -61,7 +58,7 @@ public class FitFillTests
     [Fact]
     public void Color_can_pad_with_transparency()
     {
-        var output = Transform.Png(SampleImages.SolidJpeg(400, 200, 30, 140, 60), (source, destination) => ImageTransforms.Resize(source, destination, new ImageResize(ImageOutputFormat.Png)
+        var output = Transform.Png(SampleImages.SolidJpeg(400, 200, 30, 140, 60), (source, destination) => ImageTransforms.Resize(source, destination, new ImageResize(ImageEncoding.Png())
         {
             Width = 100,
             Height = 100,
@@ -78,11 +75,12 @@ public class FitFillTests
     [Fact]
     public void Color_upscales_before_padding()
     {
-        var output = Transform.Png(SampleImages.SolidJpeg(20, 10, 30, 140, 60), (source, destination) => ImageTransforms.Resize(source, destination, new ImageResize(ImageOutputFormat.Png)
+        var output = Transform.Png(SampleImages.SolidJpeg(20, 10, 30, 140, 60), (source, destination) => ImageTransforms.Resize(source, destination, new ImageResize(ImageEncoding.Png())
         {
             Width = 100,
             Height = 100,
             Canvas = ImageCanvas.SolidWhite,
+            Enlarge = true,
         }));
 
         using var image = DecodedImage.Open(output);
@@ -95,7 +93,7 @@ public class FitFillTests
     [Fact]
     public void Color_without_enlarge_pads_a_smaller_image()
     {
-        var output = Transform.Png(SampleImages.SolidJpeg(20, 10, 30, 140, 60), (source, destination) => ImageTransforms.Resize(source, destination, new ImageResize(ImageOutputFormat.Png)
+        var output = Transform.Png(SampleImages.SolidJpeg(20, 10, 30, 140, 60), (source, destination) => ImageTransforms.Resize(source, destination, new ImageResize(ImageEncoding.Png())
         {
             Width = 100,
             Height = 100,
@@ -118,18 +116,29 @@ public class FitFillTests
             (source, destination) => ImageTransforms.Resize(
                 source,
                 destination,
-                ImageOutputFormat.Jpeg,
+                ImageEncoding.Jpeg(95, ImageColor.White),
                 80,
-                40,
-                encode: new ImageEncode
-                {
-                    AlphaFallbackColor = ImageColor.White,
-                    Quality = 95,
-                }));
+                40));
 
         using var image = DecodedImage.Open(output);
         Assert.False(image.HasAlpha);
         image.Near(10, 20, 20, 180, 40);
         image.Near(70, 20, 255, 255, 255);
+    }
+
+    [Fact]
+    public void Canvas_rejects_a_greyscale_source()
+    {
+        var ex = Assert.Throws<ImageException>(() =>
+            Transform.Png(SampleImages.GreyPng(40, 20, 180), (source, destination) =>
+                ImageTransforms.Resize(source, destination, new ImageResize(ImageEncoding.Png())
+                {
+                    Width = 80,
+                    Height = 40,
+                    Canvas = ImageCanvas.SolidBlack,
+                })));
+
+        Assert.Contains("RGB", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("color band", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 }

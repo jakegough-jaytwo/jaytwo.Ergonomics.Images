@@ -19,8 +19,14 @@ internal abstract record PipelineOp
         int? Width,
         int? Height,
         ImageAspectRatio? Aspect,
-        ImageFit Fit,
+        ResizeMode Mode,
         ImageFocus? Focus,
         ImageCanvas? Canvas,
         bool Enlarge) : PipelineOp;
+
+    internal sealed record CropOp(
+        double X,
+        double Y,
+        double Width,
+        double Height) : PipelineOp;
 }

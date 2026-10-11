@@ -2,16 +2,16 @@ using Xunit;
 
 namespace jaytwo.Ergonomics.Images.Tests;
 
-public class FitMinTests
+public class CropMinTests
 {
     [Fact]
     public void Zoom_without_enlarge_discards_overflow_to_the_requested_aspect()
     {
-        var output = Transform.Png(SampleImages.SolidJpeg(300, 200, 30, 140, 60), (source, destination) => ImageTransforms.Resize(source, destination, new ImageResize(ImageOutputFormat.Png)
+        var output = Transform.Png(SampleImages.SolidJpeg(300, 200, 30, 140, 60), (source, destination) => ImageTransforms.Resize(source, destination, new ImageResize(ImageEncoding.Png())
         {
             Width = 500,
             Height = 200,
-            Fit = ImageFit.Zoom,
+            Mode = ResizeMode.Crop,
             Enlarge = false,
         }));
 
@@ -23,11 +23,11 @@ public class FitMinTests
     [Fact]
     public void Zoom_without_enlarge_scales_down_when_the_aspect_window_is_larger_than_the_box()
     {
-        var output = Transform.Png(SampleImages.SolidJpeg(400, 200, 30, 140, 60), (source, destination) => ImageTransforms.Resize(source, destination, new ImageResize(ImageOutputFormat.Png)
+        var output = Transform.Png(SampleImages.SolidJpeg(400, 200, 30, 140, 60), (source, destination) => ImageTransforms.Resize(source, destination, new ImageResize(ImageEncoding.Png())
         {
             Width = 100,
             Height = 100,
-            Fit = ImageFit.Zoom,
+            Mode = ResizeMode.Crop,
             Enlarge = false,
         }));
 
