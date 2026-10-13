@@ -345,23 +345,58 @@ Width and height then apply to that raster. With `Metadata = Preserve`, a preser
 
 ### Identify (read)
 
+Identify types (`ImageMetadata`, IFDs, bags, `ImageFormat`, `ImageGps`) live in `jaytwo.Ergonomics.Images.Metadata`. Encode-time `MetadataPolicy` stays on the root namespace with `ImageEncoding`.
+
 ```csharp
+using jaytwo.Ergonomics.Images.Metadata;
+
 using var source = File.OpenRead(path);
 var meta = ImageTransforms.Identify(source);
 
 meta.Structure.Size;       // stored pixels
 meta.Structure.VisualSize; // after EXIF orientation swap
 meta.Structure.Format;     // ImageFormat
-meta.Exif.Fields;          // libvips EXIF names → plain strings
+meta.Exif.Ifd0;            // main image IFD (properties + indexer)
+meta.Exif.Ifd0.Make;       // e.g. "SONY"
+meta.Exif.Ifd0["Make"];    // same via keyed lookup
+meta.Exif.Ifd2;            // EXIF sub-IFD (DateTimeOriginal, …)
+meta.Exif.Ifd3.Gps;        // parsed lat/lon from IFD3
 meta.Xmp.Xml;              // opaque XMP packet, or null
 meta.Iptc.Present;
 meta.ColorProfile.Present;
-meta.CapturedAt;           // EXIF DateTimeOriginal → Digitised → DateTime
-meta.Latitude;             // EXIF GPS IFD, decimal degrees
+meta.DateTaken;            // EXIF DateTimeOriginal → DateTimeDigitized, or null
+meta.Gps;                  // EXIF GPS IFD → ImageGps (lat/lon), or null
 meta.CameraMake;
 ```
 
 Identify opens the header (typical formats do not force a full pixel decode). It does not auto-orient; use `VisualSize` when you need the upright frame. Same facts can exist in EXIF, XMP, and IPTC; convenience properties resolve from EXIF only in this version. This is read-only — not an EXIF editor.
+
+### Date taken
+
+`DateTaken` reads `DateTimeOriginal`, then `DateTimeDigitized`, and returns the first one that parses. It never reads the IFD0 `DateTime` tag (exiftool's `ModifyDate`). That tag is the file's last-modified time, and editing software rewrites it. When neither tag parses, `DateTaken` is null. The library reads a stream, so it has no file timestamps to fall back on; the caller chooses the fallback.
+
+The parsing rules follow common EXIF readers rather than the strict spec format (`yyyy:MM:dd HH:mm:ss`):
+
+| Rule | Same as |
+| --- | --- |
+| `:` or `-` between date parts, a space or `T` before the time | [metadata-extractor], [exiftool-vendored] |
+| `.` between date parts; time without seconds; date without time (midnight) | [metadata-extractor] |
+| Text after the time is ignored | [metadata-extractor] |
+| All-zero, blank, and impossible dates (Feb 30, month 13) don't parse | [metadata-extractor], [exiftool-vendored] |
+| No plausibility range: a reset camera clock such as `1970:01:01` comes back as written | [metadata-extractor], [exiftool-vendored], [Immich] |
+| `DateTimeOriginal` before `DateTimeDigitized` (exiftool's `CreateDate`); `ModifyDate` not used | [Immich] |
+
+Where the library differs on purpose:
+
+- It returns the camera's local wall-clock time as `DateTimeKind.Unspecified`. A UTC offset in the text and the `OffsetTimeOriginal` tag are ignored. metadata-extractor and exiftool-vendored use the offset to build an absolute instant, and Immich keeps both an instant and a local time. For "which day was this taken", the local time is the one you want.
+- Subseconds are dropped.
+- Only EXIF is read. Immich also checks XMP, QuickTime, and maker-note dates, which libvips does not expose.
+
+Checked against those projects' sources in October 2026.
+
+[metadata-extractor]: https://github.com/drewnoakes/metadata-extractor/blob/main/Source/com/drew/metadata/Directory.java
+[exiftool-vendored]: https://github.com/photostructure/exiftool-vendored.js/blob/main/src/ExifDateTime.ts
+[Immich]: https://github.com/immich-app/immich/blob/main/server/src/services/metadata.service.ts
 
 ### Encode policy
 
@@ -501,7 +536,7 @@ Copyright licenses and HEVC patents are different things. This README does not m
 - Downscale goes through libvips thumbnail, which applies a mild sharpen and resizes in the image's gamma. There is no linear-light switch in this version.
 - A center crop that may enlarge goes through libvips thumbnail. A center crop that does not enlarge, an aspect-ratio crop at the source size, and a crop with a focus box decode the oriented image and then extract. Non-seekable streams take one decode.
 - A multiple of 90 degrees uses libvips' quarter-turn rotate. Any other angle resamples. `Trim` floors the centered rectangle, then keeps it one pixel inside that edge so the resampler does not mix the empty corners into the crop.
-- libvips prints EXIF strings with a suffix such as ` (value, ASCII, N components, N bytes)` when you read them back. That suffix is how libvips round-trips the field. The bytes are still the original text.
+- libvips prints EXIF strings with a suffix such as ` (description, Format, N components, N bytes)` when you read them back. Each `Exif.IfdN` dictionary strips that suffix and returns the raw stored value (for example `1/800`, `240/1`), not libexif's English description.
 - The HEIC integration fixture is a real HEVC still (`ftypheic` / `mif1` / `hvc1`, camera tag Sony DSLR-A550), not a file from an iPhone camera roll. iPhone photos often add a tile grid and an orientation tag. libheif reassembles grids before this library measures the image, but that container is not what the fixture covers. Drop a licensed iPhone capture in `test/fixtures` if you need that case locked.
 - `ImageOutputFormat.Heic` is accepted and then fails clearly when the process has no HEVC encoder. That is expected with `NetVips.Native` and with the Docker test image.
 

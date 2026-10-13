@@ -1,4 +1,4 @@
-namespace jaytwo.Ergonomics.Images;
+namespace jaytwo.Ergonomics.Images.Metadata;
 
 /// <summary>
 /// Structural header of a source image (size, format, alpha, orientation).

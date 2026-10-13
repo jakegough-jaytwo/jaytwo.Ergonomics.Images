@@ -1,4 +1,4 @@
-namespace jaytwo.Ergonomics.Images;
+namespace jaytwo.Ergonomics.Images.Metadata;
 
 /// <summary>
 /// Container format of a source image, as detected on open.

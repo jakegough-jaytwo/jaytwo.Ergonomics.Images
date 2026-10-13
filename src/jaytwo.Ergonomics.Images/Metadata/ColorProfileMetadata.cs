@@ -1,4 +1,4 @@
-namespace jaytwo.Ergonomics.Images;
+namespace jaytwo.Ergonomics.Images.Metadata;
 
 /// <summary>
 /// Embedded ICC color profile presence.

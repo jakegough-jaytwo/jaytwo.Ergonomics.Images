@@ -20,12 +20,14 @@ internal static class SampleImages
         string? model = null,
         string? dateTimeOriginal = null,
         double? latitude = null,
-        double? longitude = null)
+        double? longitude = null,
+        string? dateTimeDigitized = null,
+        string? dateTime = null)
     {
         using var left = Solid(width / 2, height, 220, 20, 20);
         using var right = Solid(width / 2, height, 20, 20, 220);
         using var joined = left.Join(right, Enums.Direction.Horizontal);
-        return Jpeg(joined, orientation, make, icc, model, dateTimeOriginal, latitude, longitude);
+        return Jpeg(joined, orientation, make, icc, model, dateTimeOriginal, latitude, longitude, dateTimeDigitized, dateTime);
     }
 
     public static byte[] VerticalHalves(int width, int height)
@@ -112,7 +114,9 @@ internal static class SampleImages
         string? model = null,
         string? dateTimeOriginal = null,
         double? latitude = null,
-        double? longitude = null)
+        double? longitude = null,
+        string? dateTimeDigitized = null,
+        string? dateTime = null)
     {
         using var tagged = image.Mutate(mutable =>
         {
@@ -130,6 +134,16 @@ internal static class SampleImages
             if (dateTimeOriginal != null)
             {
                 mutable.Set(GValue.GStrType, "exif-ifd2-DateTimeOriginal", dateTimeOriginal);
+            }
+
+            if (dateTimeDigitized != null)
+            {
+                mutable.Set(GValue.GStrType, "exif-ifd2-DateTimeDigitized", dateTimeDigitized);
+            }
+
+            if (dateTime != null)
+            {
+                mutable.Set(GValue.GStrType, "exif-ifd0-DateTime", dateTime);
             }
 
             if (latitude is double lat && longitude is double lon)

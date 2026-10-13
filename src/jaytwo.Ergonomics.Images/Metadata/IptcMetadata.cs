@@ -1,4 +1,4 @@
-namespace jaytwo.Ergonomics.Images;
+namespace jaytwo.Ergonomics.Images.Metadata;
 
 /// <summary>
 /// IPTC/IIM bag from the source image.

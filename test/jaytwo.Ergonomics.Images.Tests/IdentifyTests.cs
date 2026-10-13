@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using jaytwo.Ergonomics.Images.Metadata;
 using Xunit;
 
 namespace jaytwo.Ergonomics.Images.Tests;
@@ -43,14 +44,15 @@ public class IdentifyTests
         var meta = ImageTransforms.Identify(source);
 
         Assert.True(meta.Exif.Present);
-        Assert.Equal("jaytwo-cam", meta.Exif.Fields["exif-ifd0-Make"]);
+        Assert.Equal("jaytwo-cam", meta.Exif.Ifd0["Make"]);
+        Assert.Equal("jaytwo-cam", meta.Exif.Ifd0.Make);
+        Assert.Equal("Unit-1", meta.Exif.Ifd0.Model);
         Assert.Equal("Unit-1", meta.CameraModel);
         Assert.Equal("jaytwo-cam", meta.CameraMake);
-        Assert.Equal(new DateTime(2020, 1, 15, 14, 30, 0, DateTimeKind.Unspecified), meta.CapturedAt);
-        Assert.NotNull(meta.Latitude);
-        Assert.NotNull(meta.Longitude);
-        Assert.InRange(meta.Latitude!.Value, 37.7748, 37.7750);
-        Assert.InRange(meta.Longitude!.Value, -122.4195, -122.4193);
+        Assert.Equal(new DateTime(2020, 1, 15, 14, 30, 0, DateTimeKind.Unspecified), meta.DateTaken);
+        Assert.NotNull(meta.Gps);
+        Assert.InRange(meta.Gps!.Latitude, 37.7748, 37.7750);
+        Assert.InRange(meta.Gps!.Longitude, -122.4195, -122.4193);
         Assert.True(meta.ColorProfile.Present);
         Assert.False(meta.Xmp.Present);
         Assert.False(meta.Iptc.Present);
@@ -68,8 +70,8 @@ public class IdentifyTests
         Assert.True(meta.Structure.HasAlpha);
         Assert.Equal(4, meta.Structure.Bands);
         Assert.Null(meta.CameraMake);
-        Assert.Null(meta.CapturedAt);
-        Assert.Null(meta.Latitude);
+        Assert.Null(meta.DateTaken);
+        Assert.Null(meta.Gps);
     }
 
     [Fact]

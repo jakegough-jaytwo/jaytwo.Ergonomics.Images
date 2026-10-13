@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
+using jaytwo.Ergonomics.Images.Metadata;
 using NetVips;
 
 namespace jaytwo.Ergonomics.Images;
@@ -12,25 +14,36 @@ namespace jaytwo.Ergonomics.Images;
 /// </summary>
 internal static class MetadataReader
 {
-    private static readonly Regex ExifUnwrap = new(
-        @"^(.*) \(\1, .+\)$",
+    private static readonly Regex ExifValueSuffix = new(
+        @", (Byte|ASCII|Short|Long|Rational|SByte|Undefined|SShort|SLong|SRational|Float|Double), (\d+) components, (\d+) bytes\)$",
         RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
-    private static readonly string[] CapturedAtKeys =
-    {
-        "exif-ifd2-DateTimeOriginal",
-        "exif-ifd2-DateTimeDigitized",
-        "exif-ifd0-DateTime",
-        "exif-ifd2-DateTime",
-    };
+    private static readonly Regex ExifUnwrapAscii = new(
+        @"^(.*) \(\1, ASCII, \d+ components, \d+ bytes\)$",
+        RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+    private static readonly Regex ExifFieldName = new(
+        @"^exif-ifd(\d+)-(.+)$",
+        RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
     public static ImageMetadata FromImage(Image image, ReadOnlySpan<byte> headerHint)
     {
         var names = image.GetFields() ?? Array.Empty<string>();
         var nameSet = new HashSet<string>(names, StringComparer.Ordinal);
-        var fields = CollectExifFields(image, names);
-        var exifPresent = HasBlob(image, nameSet, "exif-data") || fields.Count > 0;
-        var exif = new ExifMetadata(exifPresent, fields);
+        var ifds = CollectExifIfds(image, names);
+        var exifPresent = HasBlob(image, nameSet, "exif-data")
+            || ifds.Ifd0.Count > 0
+            || ifds.Ifd1.Count > 0
+            || ifds.Ifd2.Count > 0
+            || ifds.Ifd3.Count > 0
+            || ifds.Ifd4.Count > 0;
+        var exif = new ExifMetadata(
+            exifPresent,
+            ifds.Ifd0,
+            ifds.Ifd1,
+            ifds.Ifd2,
+            ifds.Ifd3,
+            ifds.Ifd4);
 
         string? xmpXml = null;
         var xmpPresent = TryReadBlobAsUtf8(image, nameSet, "xmp-data", out xmpXml);
@@ -50,30 +63,26 @@ internal static class MetadataReader
             orientation,
             pageCount);
 
-        TryReadGps(fields, out var latitude, out var longitude);
-
-        return new ImageMetadata(
-            structure,
-            exif,
-            xmp,
-            iptc,
-            colorProfile,
-            ReadCapturedAt(fields),
-            latitude,
-            longitude,
-            ReadField(fields, "exif-ifd0-Make"),
-            ReadField(fields, "exif-ifd0-Model"));
+        return new ImageMetadata(structure, exif, xmp, iptc, colorProfile);
     }
 
-    private static Dictionary<string, string> CollectExifFields(Image image, string[] names)
+    private static (
+        ExifIfd0 Ifd0,
+        ExifIfd1 Ifd1,
+        ExifIfd2 Ifd2,
+        ExifIfd3 Ifd3,
+        ExifIfd4 Ifd4)
+        CollectExifIfds(Image image, string[] names)
     {
-        var result = new Dictionary<string, string>(StringComparer.Ordinal);
+        Dictionary<string, string>? ifd0 = null;
+        Dictionary<string, string>? ifd1 = null;
+        Dictionary<string, string>? ifd2 = null;
+        Dictionary<string, string>? ifd3 = null;
+        Dictionary<string, string>? ifd4 = null;
 
         foreach (var name in names)
         {
-            if (name is null
-                || !name.StartsWith("exif-", StringComparison.Ordinal)
-                || string.Equals(name, "exif-data", StringComparison.Ordinal))
+            if (name is null || !TryParseExifFieldName(name, out var ifd, out var tag) || ifd is < 0 or > 4)
             {
                 continue;
             }
@@ -94,10 +103,71 @@ internal static class MetadataReader
                 continue;
             }
 
-            result[name] = UnwrapExif(text);
+            var bag = ifd switch
+            {
+                0 => ifd0 ??= new Dictionary<string, string>(StringComparer.Ordinal),
+                1 => ifd1 ??= new Dictionary<string, string>(StringComparer.Ordinal),
+                2 => ifd2 ??= new Dictionary<string, string>(StringComparer.Ordinal),
+                3 => ifd3 ??= new Dictionary<string, string>(StringComparer.Ordinal),
+                _ => ifd4 ??= new Dictionary<string, string>(StringComparer.Ordinal),
+            };
+
+            if (!bag.ContainsKey(tag))
+            {
+                bag[tag] = UnwrapExif(text);
+            }
         }
 
-        return result;
+        return (
+            FreezeIfd0(ifd0),
+            FreezeIfd1(ifd1),
+            FreezeIfd2(ifd2),
+            FreezeIfd3(ifd3),
+            FreezeIfd4(ifd4));
+    }
+
+    private static IReadOnlyDictionary<string, string> FreezeFields(Dictionary<string, string>? bag)
+    {
+        if (bag is null || bag.Count == 0)
+        {
+            return ExifIfd.EmptyFields;
+        }
+
+        return new ReadOnlyDictionary<string, string>(bag);
+    }
+
+    private static ExifIfd0 FreezeIfd0(Dictionary<string, string>? bag)
+        => bag is null || bag.Count == 0 ? ExifIfd0.Empty : new ExifIfd0(FreezeFields(bag));
+
+    private static ExifIfd1 FreezeIfd1(Dictionary<string, string>? bag)
+        => bag is null || bag.Count == 0 ? ExifIfd1.Empty : new ExifIfd1(FreezeFields(bag));
+
+    private static ExifIfd2 FreezeIfd2(Dictionary<string, string>? bag)
+        => bag is null || bag.Count == 0 ? ExifIfd2.Empty : new ExifIfd2(FreezeFields(bag));
+
+    private static ExifIfd3 FreezeIfd3(Dictionary<string, string>? bag)
+        => bag is null || bag.Count == 0 ? ExifIfd3.Empty : new ExifIfd3(FreezeFields(bag));
+
+    private static ExifIfd4 FreezeIfd4(Dictionary<string, string>? bag)
+        => bag is null || bag.Count == 0 ? ExifIfd4.Empty : new ExifIfd4(FreezeFields(bag));
+
+    private static bool TryParseExifFieldName(string name, out int ifd, out string tag)
+    {
+        ifd = 0;
+        tag = string.Empty;
+        var match = ExifFieldName.Match(name);
+        if (!match.Success)
+        {
+            return false;
+        }
+
+        if (!int.TryParse(match.Groups[1].Value, NumberStyles.None, CultureInfo.InvariantCulture, out ifd))
+        {
+            return false;
+        }
+
+        tag = match.Groups[2].Value;
+        return tag.Length > 0;
     }
 
     private static string? ToPlainString(object? raw)
@@ -117,13 +187,22 @@ internal static class MetadataReader
 
     private static string UnwrapExif(string value)
     {
-        var match = ExifUnwrap.Match(value);
-        if (match.Success)
+        var trimmed = value.Trim().Trim('\0');
+        var suffix = ExifValueSuffix.Match(trimmed);
+        if (!suffix.Success)
         {
-            return match.Groups[1].Value;
+            return trimmed;
         }
 
-        return value.Trim().Trim('\0');
+        var format = suffix.Groups[1].Value;
+        if (string.Equals(format, "ASCII", StringComparison.Ordinal))
+        {
+            var ascii = ExifUnwrapAscii.Match(trimmed);
+            return ascii.Success ? ascii.Groups[1].Value : trimmed;
+        }
+
+        var openParen = trimmed.IndexOf(" (", StringComparison.Ordinal);
+        return openParen < 0 ? trimmed : trimmed.Substring(0, openParen);
     }
 
     private static bool HasBlob(Image image, HashSet<string> names, string name)
@@ -284,162 +363,5 @@ internal static class MetadataReader
         {
             return null;
         }
-    }
-
-    private static string? ReadField(IReadOnlyDictionary<string, string> fields, string key)
-    {
-        return fields.TryGetValue(key, out var value) && value.Length > 0 ? value : null;
-    }
-
-    private static DateTime? ReadCapturedAt(IReadOnlyDictionary<string, string> fields)
-    {
-        foreach (var key in CapturedAtKeys)
-        {
-            if (!fields.TryGetValue(key, out var raw) || raw.Length == 0)
-            {
-                continue;
-            }
-
-            if (TryParseExifDateTime(raw, out var parsed))
-            {
-                return parsed;
-            }
-        }
-
-        return null;
-    }
-
-    private static bool TryParseExifDateTime(string value, out DateTime result)
-    {
-        result = default;
-        var text = UnwrapExif(value);
-        if (DateTime.TryParseExact(
-                text,
-                "yyyy:MM:dd HH:mm:ss",
-                CultureInfo.InvariantCulture,
-                DateTimeStyles.None,
-                out result))
-        {
-            result = DateTime.SpecifyKind(result, DateTimeKind.Unspecified);
-            return true;
-        }
-
-        return false;
-    }
-
-    private static void TryReadGps(
-        IReadOnlyDictionary<string, string> fields,
-        out double? latitude,
-        out double? longitude)
-    {
-        latitude = null;
-        longitude = null;
-
-        if (!TryReadGpsCoordinate(
-                fields,
-                "exif-ifd3-GPSLatitude",
-                "exif-ifd3-GPSLatitudeRef",
-                "N",
-                "S",
-                out var lat))
-        {
-            return;
-        }
-
-        if (!TryReadGpsCoordinate(
-                fields,
-                "exif-ifd3-GPSLongitude",
-                "exif-ifd3-GPSLongitudeRef",
-                "E",
-                "W",
-                out var lon))
-        {
-            return;
-        }
-
-        latitude = lat;
-        longitude = lon;
-    }
-
-    private static bool TryReadGpsCoordinate(
-        IReadOnlyDictionary<string, string> fields,
-        string valueKey,
-        string refKey,
-        string positiveRef,
-        string negativeRef,
-        out double degrees)
-    {
-        degrees = 0;
-        if (!fields.TryGetValue(valueKey, out var raw) || !fields.TryGetValue(refKey, out var reference))
-        {
-            return false;
-        }
-
-        if (!TryParseGpsRationalTriplet(raw, out var absolute))
-        {
-            return false;
-        }
-
-        var hemi = UnwrapExif(reference).Trim();
-        if (hemi.Length == 0)
-        {
-            return false;
-        }
-
-        var signChar = char.ToUpperInvariant(hemi[0]);
-        if (signChar == positiveRef[0])
-        {
-            degrees = absolute;
-            return true;
-        }
-
-        if (signChar == negativeRef[0])
-        {
-            degrees = -absolute;
-            return true;
-        }
-
-        return false;
-    }
-
-    private static bool TryParseGpsRationalTriplet(string value, out double degrees)
-    {
-        degrees = 0;
-        var text = UnwrapExif(value);
-        var parts = text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
-        if (parts.Length < 3)
-        {
-            return false;
-        }
-
-        if (!TryParseRational(parts[0], out var d)
-            || !TryParseRational(parts[1], out var m)
-            || !TryParseRational(parts[2], out var s))
-        {
-            return false;
-        }
-
-        degrees = d + (m / 60d) + (s / 3600d);
-        return double.IsFinite(degrees);
-    }
-
-    private static bool TryParseRational(string text, out double value)
-    {
-        value = 0;
-        var slash = text.IndexOf('/');
-        if (slash < 0)
-        {
-            return double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out value);
-        }
-
-        if (!double.TryParse(text.AsSpan(0, slash), NumberStyles.Float, CultureInfo.InvariantCulture, out var num)
-            || !double.TryParse(text.AsSpan(slash + 1), NumberStyles.Float, CultureInfo.InvariantCulture, out var den)
-            || den == 0d)
-        {
-            return false;
-        }
-
-        value = num / den;
-        return true;
     }
 }

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading;
+using jaytwo.Ergonomics.Images.Metadata;
 using NetVips;
 
 namespace jaytwo.Ergonomics.Images;
