@@ -17,6 +17,7 @@ namespace jaytwo.Ergonomics.Images;
 /// Native stages share one libvips graph and encode once at <see cref="Run"/> or <see cref="RunAsync"/>.
 /// Example:
 /// <c>ImagePipeline.Create().Resize(256, 256, ResizeMode.Crop, r => r.Focus(...)).EncodingWebP().Run(...)</c>.
+/// Resize modes are Fit / Pad / Crop / Stretch.
 /// </remarks>
 public sealed class ImagePipeline
 {
@@ -115,7 +116,7 @@ public sealed class ImagePipeline
     /// <remarks>
     /// Coordinates match <see cref="ImageFocus"/>: fractions from 0 to 1, origin at the top left, after auto-orient.
     /// The box must stay inside the image and have positive area. This extracts that rectangle; it is not
-    /// <see cref="ResizeMode.Crop"/> (scale-to-fill and discard overflow).
+    /// <see cref="ResizeMode.Crop"/> (cover the frame and discard overflow).
     /// </remarks>
     public ImagePipeline Crop(double x, double y, double width, double height)
     {
@@ -123,7 +124,7 @@ public sealed class ImagePipeline
         return Append(new PipelineOp.CropOp(x, y, width, height));
     }
 
-    /// <summary>Appends a resize frame. Mode defaults to <see cref="ResizeMode.Pad"/>.</summary>
+    /// <summary>Appends a resize frame. Mode defaults to <see cref="ResizeMode.Fit"/>.</summary>
     /// <param name="size">Width and height of the frame.</param>
     /// <param name="mode">How the source meets the frame. Pass <see cref="ResizeMode.Crop"/> when using Focus.</param>
     /// <param name="configure">
@@ -131,36 +132,31 @@ public sealed class ImagePipeline
     /// </param>
     /// <returns>A pipeline that includes the resize.</returns>
     /// <remarks>
-    /// There is no <c>Resize(ImageSize, Action)</c> overload that forces Pad: Focus and other
-    /// mode-specific options require an explicit <paramref name="mode"/>.
+    /// There is no <c>Resize(ImageSize, Action)</c> or <c>Resize(width, height, Action)</c> overload
+    /// that silently picks a mode: Focus, canvas, and other mode-specific options require an explicit
+    /// <paramref name="mode"/>.
     /// </remarks>
     public ImagePipeline Resize(
         ImageSize size,
-        ResizeMode mode = ResizeMode.Pad,
+        ResizeMode mode = ResizeMode.Fit,
         Action<ImagePipelineResize>? configure = null)
         => Resize(size.Width, size.Height, mode, configure);
-
-    /// <summary>Appends a resize frame with <see cref="ResizeMode.Pad"/> and the given options.</summary>
-    /// <param name="width">Requested width in pixels.</param>
-    /// <param name="height">Requested height in pixels.</param>
-    /// <param name="configure">Aspect, focus, enlarge, and/or canvas for this resize.</param>
-    /// <returns>A pipeline that includes the resize.</returns>
-    public ImagePipeline Resize(int? width, int? height, Action<ImagePipelineResize> configure)
-        => Resize(width, height, ResizeMode.Pad, configure);
 
     /// <summary>Appends a resize frame.</summary>
     /// <param name="width">Requested width in pixels.</param>
     /// <param name="height">Requested height in pixels.</param>
-    /// <param name="mode">How the source meets the frame. Defaults to <see cref="ResizeMode.Pad"/>.</param>
+    /// <param name="mode">How the source meets the frame. Defaults to <see cref="ResizeMode.Fit"/>.</param>
     /// <param name="configure">
     /// Optional aspect, focus, enlarge, and canvas (<see cref="ImagePipelineResize"/>).
-    /// Omit it for a plain pad/crop/distort with library defaults.
+    /// Omit it for a plain fit/pad/crop/stretch with library defaults.
+    /// When <paramref name="configure"/> is used, pass an explicit <paramref name="mode"/>
+    /// (there is no Action-only overload that forces Fit).
     /// </param>
     /// <returns>A pipeline that includes the resize.</returns>
     public ImagePipeline Resize(
         int? width = null,
         int? height = null,
-        ResizeMode mode = ResizeMode.Pad,
+        ResizeMode mode = ResizeMode.Fit,
         Action<ImagePipelineResize>? configure = null)
     {
         if (width is <= 0)
@@ -181,15 +177,15 @@ public sealed class ImagePipeline
         var options = new ImagePipelineResize();
         configure?.Invoke(options);
 
-        // Resolve FitInside's both-sides+aspect and clears NativeAspect; reject Distort first.
-        RejectDistortBoxWithAspect(mode, width, height, options.AspectRatio);
+        // Resolve FitInside's both-sides+aspect and clears NativeAspect; reject Stretch first.
+        RejectStretchBoxWithAspect(mode, width, height, options.AspectRatio);
 
         var frame = options.AspectRatio is ImageAspectRatio aspect
             ? ImageTransforms.Resolve(width, height, aspect)
             : new ImageTransforms.Frame(width, height, null);
 
-        // Distort always writes the requested size via Size.Force; enlarge does not apply.
-        var enlarge = mode != ResizeMode.Distort && options.EnlargeEnabled;
+        // Stretch always writes the requested size via Size.Force; enlarge does not apply.
+        var enlarge = mode != ResizeMode.Stretch && options.EnlargeEnabled;
         var op = new PipelineOp.ResizeOp(
             frame.Width,
             frame.Height,
@@ -322,8 +318,8 @@ public sealed class ImagePipeline
             throw new ArgumentNullException(nameof(resize));
         }
 
-        // Same order as Resize: reject Distort+box+aspect before Resolve clears aspect.
-        RejectDistortBoxWithAspect(resize.Mode, resize.Width, resize.Height, resize.Aspect);
+        // Same order as Resize: reject Stretch+box+aspect before Resolve clears aspect.
+        RejectStretchBoxWithAspect(resize.Mode, resize.Width, resize.Height, resize.Aspect);
 
         var frame = ImageTransforms.Resolve(resize);
         return Create(s => s.AutoOrient(resize.AutoOrient).SourceAlpha(resize.SourceAlpha))
@@ -344,7 +340,7 @@ public sealed class ImagePipeline
                     r.Canvas(canvas);
                 }
 
-                if (resize.Mode != ResizeMode.Distort && resize.Enlarge)
+                if (resize.Mode != ResizeMode.Stretch && resize.Enlarge)
                 {
                     r.Enlarge(true);
                 }
@@ -453,27 +449,30 @@ public sealed class ImagePipeline
 
         switch (resize.Mode)
         {
-            case ResizeMode.Pad:
-                if (hasCanvas && !hasAspect && (!hasWidth || !hasHeight))
+            case ResizeMode.Fit:
+                if (hasCanvas)
                 {
-                    throw new ArgumentException("A canvas needs a width and a height, or an aspect ratio.", nameof(resize));
+                    throw new ArgumentException(
+                        "A canvas applies with Pad, or with Crop for gaps. Use Pad for an exact letterboxed frame.",
+                        nameof(resize));
                 }
 
-                if (!hasCanvas && hasAspect && !hasWidth && !hasHeight)
+                if (hasAspect && !hasWidth && !hasHeight)
                 {
-                    throw new ArgumentException("Pad to an aspect ratio needs a canvas or a pixel size.", nameof(resize));
+                    throw new ArgumentException("Fit to an aspect ratio needs a pixel size.", nameof(resize));
+                }
+
+                break;
+
+            case ResizeMode.Pad:
+                if (!hasAspect && (!hasWidth || !hasHeight))
+                {
+                    throw new ArgumentException("Pad needs a width and a height, or an aspect ratio.", nameof(resize));
                 }
 
                 break;
 
             case ResizeMode.Crop:
-                if (hasCanvas && resize.Focus is null)
-                {
-                    throw new ArgumentException(
-                        "On Crop, a canvas needs a Focus box for the uncovered gap (or use Pad).",
-                        nameof(resize));
-                }
-
                 if (!hasAspect && (!hasWidth || !hasHeight))
                 {
                     throw new ArgumentException("Crop needs a width and a height, or an aspect ratio.", nameof(resize));
@@ -481,20 +480,20 @@ public sealed class ImagePipeline
 
                 break;
 
-            case ResizeMode.Distort:
+            case ResizeMode.Stretch:
                 if (hasCanvas)
                 {
                     throw new ArgumentException(
-                        "A canvas applies with Pad, or with Crop when Focus is set.",
+                        "A canvas applies with Pad, or with Crop for gaps.",
                         nameof(resize));
                 }
 
-                RejectDistortBoxWithAspect(resize.Mode, resize.Width, resize.Height, resize.Aspect);
+                RejectStretchBoxWithAspect(resize.Mode, resize.Width, resize.Height, resize.Aspect);
 
                 if (!HasExactSize(hasWidth, hasHeight, hasAspect))
                 {
                     throw new ArgumentException(
-                        "Distort needs a width and a height, or an aspect ratio and one side.",
+                        "Stretch needs a width and a height, or an aspect ratio and one side.",
                         nameof(resize));
                 }
 
@@ -503,18 +502,18 @@ public sealed class ImagePipeline
     }
 
     /// <summary>
-    /// Distort takes an exact pixel box, or one side plus an aspect. Both sides plus an aspect
+    /// Stretch takes an exact pixel box, or one side plus an aspect. Both sides plus an aspect
     /// must be rejected before frame resolve FitInside clears the aspect.
     /// </summary>
-    private static void RejectDistortBoxWithAspect(
+    private static void RejectStretchBoxWithAspect(
         ResizeMode mode,
         int? width,
         int? height,
         ImageAspectRatio? aspect)
     {
-        if (mode == ResizeMode.Distort && width is not null && height is not null && aspect is not null)
+        if (mode == ResizeMode.Stretch && width is not null && height is not null && aspect is not null)
         {
-            throw new ArgumentException("Distort uses the width and height as the exact size.");
+            throw new ArgumentException("Stretch uses the width and height as the exact size.");
         }
     }
 

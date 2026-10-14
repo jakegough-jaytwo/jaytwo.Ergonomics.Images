@@ -6,12 +6,31 @@ namespace jaytwo.Ergonomics.Images.Tests;
 public class PadCanvasTests
 {
     [Fact]
+    public void Pad_letterboxes_without_an_explicit_canvas()
+    {
+        var output = Transform.Png(SampleImages.SolidJpeg(400, 200, 30, 140, 60), (source, destination) => ImageTransforms.Resize(source, destination, new ImageResize(ImageEncoding.Png())
+        {
+            Width = 100,
+            Height = 100,
+            Mode = ResizeMode.Pad,
+        }));
+
+        using var image = DecodedImage.Open(output);
+        Assert.Equal(100, image.Width);
+        Assert.Equal(100, image.Height);
+        Assert.True(image.HasAlpha);
+        image.AlphaNear(50, 2, 0);
+        image.Near(50, 50, 30, 140, 60);
+    }
+
+    [Fact]
     public void Color_letterboxes_a_landscape_image()
     {
         var output = Transform.Png(SampleImages.SolidJpeg(400, 200, 30, 140, 60), (source, destination) => ImageTransforms.Resize(source, destination, new ImageResize(ImageEncoding.Png())
         {
             Width = 100,
             Height = 100,
+            Mode = ResizeMode.Pad,
             Canvas = ImageCanvas.SolidWhite,
         }));
 
@@ -30,6 +49,7 @@ public class PadCanvasTests
         {
             Width = 100,
             Height = 100,
+            Mode = ResizeMode.Pad,
             Canvas = ImageCanvas.SolidWhite,
         }));
 
@@ -48,6 +68,7 @@ public class PadCanvasTests
         {
             Width = 100,
             Height = 100,
+            Mode = ResizeMode.Pad,
             Canvas = ImageCanvas.Solid(new ImageColor(10, 20, 30)),
         }));
 
@@ -62,6 +83,7 @@ public class PadCanvasTests
         {
             Width = 100,
             Height = 100,
+            Mode = ResizeMode.Pad,
             Canvas = ImageCanvas.Transparent,
         }));
 
@@ -79,6 +101,7 @@ public class PadCanvasTests
         {
             Width = 100,
             Height = 100,
+            Mode = ResizeMode.Pad,
             Canvas = ImageCanvas.SolidWhite,
             Enlarge = true,
         }));
@@ -97,6 +120,7 @@ public class PadCanvasTests
         {
             Width = 100,
             Height = 100,
+            Mode = ResizeMode.Pad,
             Canvas = ImageCanvas.SolidWhite,
             Enlarge = false,
         }));
@@ -135,6 +159,7 @@ public class PadCanvasTests
                 {
                     Width = 80,
                     Height = 40,
+                    Mode = ResizeMode.Pad,
                     Canvas = ImageCanvas.SolidBlack,
                 })));
 

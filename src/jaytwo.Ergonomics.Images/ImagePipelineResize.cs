@@ -53,7 +53,7 @@ public sealed class ImagePipelineResize
 
     /// <summary>
     /// Sets whether the source may grow to meet the frame. Defaults to false.
-    /// Ignored for <see cref="ResizeMode.Distort"/>, which always writes the requested size.
+    /// Ignored for <see cref="ResizeMode.Stretch"/>, which always writes the requested size.
     /// </summary>
     /// <param name="enlarge">True to allow upscaling.</param>
     /// <returns>This resize configuration.</returns>
@@ -64,7 +64,8 @@ public sealed class ImagePipelineResize
     }
 
     /// <summary>
-    /// Sets the canvas plate for pad gaps or a crop-focus remainder.
+    /// Sets the canvas plate for pad letterboxes or crop underfill / focus remainders.
+    /// Rejected on <see cref="ResizeMode.Fit"/> and <see cref="ResizeMode.Stretch"/>.
     /// </summary>
     /// <param name="canvas">The plate under geometry gaps and, for solid/checkerboard plates, under preserved content alpha.</param>
     /// <returns>This resize configuration.</returns>

@@ -6,16 +6,17 @@ namespace jaytwo.Ergonomics.Images;
 /// Mode, frame, and canvas for one <see cref="ImageTransforms"/> resize shortcut (compiles to <see cref="ImagePipeline"/>).
 /// </summary>
 /// <remarks>
-/// <see cref="Mode"/> defaults to <see cref="ResizeMode.Pad"/>.
+/// <see cref="Mode"/> defaults to <see cref="ResizeMode.Fit"/>.
 /// Width and height are a pixel box. <see cref="Aspect"/> is the output ratio.
 /// One side plus an aspect ratio calculates the other side.
 /// Both sides plus an aspect ratio treat the sides as a maximum box: the frame is the
 /// largest rectangle of that ratio inside the box.
 /// An aspect ratio alone crops with <see cref="ResizeMode.Crop"/>, or pads with
-/// <see cref="ResizeMode.Pad"/> and a <see cref="Canvas"/>, at the source size.
-/// <see cref="Canvas"/> is separate from the mode. It applies with <see cref="ResizeMode.Pad"/>,
-/// and on <see cref="ResizeMode.Crop"/> it is the remainder when <see cref="Focus"/> does not fit.
-/// <see cref="ResizeMode.Crop"/> keeps the center when <see cref="Focus"/> is omitted.
+/// <see cref="ResizeMode.Pad"/>, at the source size.
+/// <see cref="Canvas"/> is paint only. It applies with <see cref="ResizeMode.Pad"/> (letterbox bars;
+/// transparent if omitted) and on <see cref="ResizeMode.Crop"/> for underfill / focus remainders.
+/// <see cref="ResizeMode.Fit"/> rejects a canvas. <see cref="ResizeMode.Crop"/> keeps the center
+/// when <see cref="Focus"/> is omitted.
 /// <see cref="AutoOrient"/> and <see cref="SourceAlpha"/> are source admission (same as
 /// <see cref="ImagePipeline.Create"/>). Metadata and format options live on <see cref="Encoding"/>.
 /// </remarks>
@@ -54,8 +55,8 @@ public sealed record ImageResize
     /// <summary>Gets the output ratio. Omit it to use the pixel box and the source aspect.</summary>
     public ImageAspectRatio? Aspect { get; init; }
 
-    /// <summary>Gets how the source meets the frame. Defaults to <see cref="ResizeMode.Pad"/>.</summary>
-    public ResizeMode Mode { get; init; } = ResizeMode.Pad;
+    /// <summary>Gets how the source meets the frame. Defaults to <see cref="ResizeMode.Fit"/>.</summary>
+    public ResizeMode Mode { get; init; } = ResizeMode.Fit;
 
     /// <summary>
     /// Gets the relative rectangle a <see cref="ResizeMode.Crop"/> window must keep.
@@ -64,12 +65,11 @@ public sealed record ImageResize
     public ImageFocus? Focus { get; init; }
 
     /// <summary>
-    /// Gets the plate the padded or focus-remainder image is placed on.
+    /// Gets the plate under pad letterboxes or crop underfill / focus remainders.
     /// </summary>
     /// <remarks>
-    /// Applies with <see cref="ResizeMode.Pad"/> so the output matches the frame.
-    /// On <see cref="ResizeMode.Crop"/> it paints the remainder when <see cref="Focus"/> does not
-    /// fit in the cover window; omit it there and the remainder is transparent.
+    /// Applies with <see cref="ResizeMode.Pad"/> so gaps match the frame (transparent if omitted).
+    /// On <see cref="ResizeMode.Crop"/> it paints underfill and focus remainders the same way.
     /// Solid and checkerboard plates also show through preserved content alpha — see
     /// <see cref="ImageCanvas"/>. Not <see cref="AlphaBehavior"/> and not
     /// <see cref="ImageEncoding.JpegEncoding.AlphaFallbackColor"/>.
@@ -95,7 +95,7 @@ public sealed record ImageResize
     /// Gets a value indicating whether the source may grow to meet the frame.
     /// </summary>
     /// <remarks>
-    /// Defaults to <c>false</c>. <see cref="ResizeMode.Distort"/> always writes the requested size
+    /// Defaults to <c>false</c>. <see cref="ResizeMode.Stretch"/> always writes the requested size
     /// and ignores this flag.
     /// </remarks>
     public bool Enlarge { get; init; }

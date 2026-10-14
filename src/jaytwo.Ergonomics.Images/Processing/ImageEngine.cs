@@ -134,7 +134,7 @@ internal static class ImageEngine
                 source,
                 destination,
                 format,
-                ResizeMode.Pad,
+                ResizeMode.Fit,
                 width: null,
                 height: null,
                 aspect: null,
@@ -334,6 +334,11 @@ internal static class ImageEngine
             cancellationToken);
     }
 
+    /// <summary>
+    /// Opens with sequential access (works for non-seekable <see cref="PrefixStream"/> /
+    /// ASP.NET bodies). Autorot may transpose EXIF tags 5–8; libvips buffers as needed.
+    /// Covered by non-seekable orientation tests.
+    /// </summary>
     internal static Image LoadOriented(Stream source, bool autoOrient, string? loaderOptions, List<IDisposable> owned)
     {
         var vipsSource = new VipsStreamSource(source);
@@ -540,7 +545,9 @@ internal static class ImageEngine
                     : CropToFocusLoaded(image, transform, owned);
             }
 
-            if (transform.Aspect is not null && transform.Mode != ResizeMode.Pad)
+            if (transform.Aspect is not null
+                && transform.Mode != ResizeMode.Fit
+                && transform.Mode != ResizeMode.Pad)
             {
                 throw new ArgumentOutOfRangeException(nameof(transform));
             }
@@ -550,6 +557,7 @@ internal static class ImageEngine
 
         switch (transform.Mode)
         {
+            case ResizeMode.Fit:
             case ResizeMode.Pad:
                 return FitLoaded(
                     image,
@@ -559,7 +567,7 @@ internal static class ImageEngine
                     crop: null,
                     owned);
 
-            case ResizeMode.Distort:
+            case ResizeMode.Stretch:
                 return FitLoaded(
                     image,
                     transform.Width!.Value,
@@ -603,6 +611,8 @@ internal static class ImageEngine
         var window = TakeCenter(oriented, cropWidth, cropHeight, owned);
         if (window.Width <= width && window.Height <= height)
         {
+            // Crop always writes the frame; Finish letterboxes the underfill.
+            transform.UnderfillsFrame = window.Width < width || window.Height < height;
             return window;
         }
 
@@ -626,6 +636,9 @@ internal static class ImageEngine
 
         if (!plan.Enlarge && cropped.Width <= width && cropped.Height <= height)
         {
+            plan.UnderfillsFrame = plan.UnderfillsFrame
+                || cropped.Width < width
+                || cropped.Height < height;
             return cropped;
         }
 
@@ -679,6 +692,11 @@ internal static class ImageEngine
     private static Image Finish(Image image, Plan plan, List<IDisposable> owned)
     {
         var canvas = plan.Canvas;
+        if (plan.Mode == ResizeMode.Fit || plan.Mode == ResizeMode.Stretch)
+        {
+            return image;
+        }
+
         if (plan.Mode == ResizeMode.Crop)
         {
             if (!plan.UnderfillsFrame)
@@ -695,11 +713,17 @@ internal static class ImageEngine
 
             canvas ??= ImageCanvas.Transparent;
         }
+        else if (plan.Mode == ResizeMode.Pad)
+        {
+            // Pad always letterboxes to the frame; canvas is paint only.
+            canvas ??= ImageCanvas.Transparent;
+        }
         else if (canvas is null)
         {
             return image;
         }
-        else if (canvas is ImageCanvas.Checkered
+
+        if (canvas is ImageCanvas.Checkered
             && plan.Width is null
             && plan.Height is null
             && plan.Aspect is null)

@@ -2,7 +2,7 @@ using Xunit;
 
 namespace jaytwo.Ergonomics.Images.Tests;
 
-public class DistortTests
+public class StretchTests
 {
     [Fact]
     public void Stretch_forces_exact_dimensions()
@@ -11,7 +11,7 @@ public class DistortTests
         {
             Width = 50,
             Height = 80,
-            Mode = ResizeMode.Distort,
+            Mode = ResizeMode.Stretch,
         }));
 
         using var image = DecodedImage.Open(output);
@@ -26,7 +26,7 @@ public class DistortTests
         {
             Width = 40,
             Height = 30,
-            Mode = ResizeMode.Distort,
+            Mode = ResizeMode.Stretch,
         }));
 
         using var image = DecodedImage.Open(output);

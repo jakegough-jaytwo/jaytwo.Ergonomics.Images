@@ -134,6 +134,13 @@ internal static class ExifConvenience
         }
 
         var signChar = char.ToUpperInvariant(hemi[0]);
+        // Latitude Ref pair is N/S (max 90); longitude is E/W (max 180).
+        var maxAbsolute = positiveRef[0] == 'N' ? 90d : 180d;
+        if (absolute > maxAbsolute)
+        {
+            return false;
+        }
+
         if (signChar == positiveRef[0])
         {
             degrees = absolute;
@@ -149,13 +156,40 @@ internal static class ExifConvenience
         return false;
     }
 
+    /// <summary>
+    /// Parses EXIF GPS coordinate payloads: a DMS triplet (<c>d m s</c>), degrees+minutes,
+    /// or a single rational / decimal (already in degrees). Absolute value only; hemisphere Ref
+    /// supplies the sign.
+    /// </summary>
     private static bool TryParseGpsRationalTriplet(string value, out double degrees)
     {
         degrees = 0;
         var parts = value.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
-        if (parts.Length < 3)
+        if (parts.Length == 0)
         {
             return false;
+        }
+
+        if (parts.Length == 1)
+        {
+            if (!TryParseRational(parts[0], out degrees) || !double.IsFinite(degrees))
+            {
+                return false;
+            }
+
+            return degrees >= 0d;
+        }
+
+        if (parts.Length == 2)
+        {
+            if (!TryParseRational(parts[0], out var d2)
+                || !TryParseRational(parts[1], out var m2))
+            {
+                return false;
+            }
+
+            degrees = d2 + (m2 / 60d);
+            return double.IsFinite(degrees) && degrees >= 0d;
         }
 
         if (!TryParseRational(parts[0], out var d)
@@ -166,7 +200,7 @@ internal static class ExifConvenience
         }
 
         degrees = d + (m / 60d) + (s / 3600d);
-        return double.IsFinite(degrees);
+        return double.IsFinite(degrees) && degrees >= 0d;
     }
 
     private static bool TryParseRational(string text, out double value)

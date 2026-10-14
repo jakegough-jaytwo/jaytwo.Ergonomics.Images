@@ -90,7 +90,7 @@ public class ImageArgumentTests
             {
                 Width = 40,
                 Height = 30,
-                Mode = ResizeMode.Distort,
+                Mode = ResizeMode.Stretch,
                 Enlarge = false,
             }));
 
@@ -100,11 +100,11 @@ public class ImageArgumentTests
     }
 
     [Fact]
-    public void Distort_rejects_both_sides_plus_aspect()
+    public void Stretch_rejects_both_sides_plus_aspect()
     {
         var fluent = Assert.Throws<ArgumentException>(() =>
             ImagePipeline.Create()
-                .Resize(400, 300, ResizeMode.Distort, r => r.Aspect(ImageAspectRatio.Square)));
+                .Resize(400, 300, ResizeMode.Stretch, r => r.Aspect(ImageAspectRatio.Square)));
         Assert.Contains("exact size", fluent.Message, StringComparison.Ordinal);
 
         var bag = Assert.Throws<ArgumentException>(() =>
@@ -113,24 +113,24 @@ public class ImageArgumentTests
                 Width = 400,
                 Height = 300,
                 Aspect = ImageAspectRatio.Square,
-                Mode = ResizeMode.Distort,
+                Mode = ResizeMode.Stretch,
             }));
         Assert.Contains("exact size", bag.Message, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Zoom_rejects_a_canvas_without_focus()
+    public void Fit_rejects_a_canvas()
     {
         var ex = Assert.Throws<ArgumentException>(() =>
             ImageTransforms.Resize(null!, null!, new ImageResize(ImageEncoding.Jpeg())
             {
                 Width = 4,
                 Height = 4,
-                Mode = ResizeMode.Crop,
+                Mode = ResizeMode.Fit,
                 Canvas = ImageCanvas.SolidBlack,
             }));
 
-        Assert.Contains("Focus", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("Pad", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -145,7 +145,7 @@ public class ImageArgumentTests
     public void Resize_canvas_stays_on_that_resize_when_a_later_rotate_trims()
     {
         var pipeline = ImagePipeline.Create()
-            .Resize(100, 100, r => r.Canvas(ImageCanvas.SolidWhite))
+            .Resize(100, 100, ResizeMode.Pad, r => r.Canvas(ImageCanvas.SolidWhite))
             .Rotate(ImageRotation.Clockwise(90), r => r.Trim())
             .EncodingPng();
 
@@ -166,20 +166,20 @@ public class ImageArgumentTests
     }
 
     [Fact]
-    public void Focus_rejects_pad_immediately()
+    public void Focus_rejects_fit_immediately()
     {
         Assert.Throws<ArgumentException>(() =>
             ImagePipeline.Create()
-                .Resize(10, 10, r => r.Focus(ImageFocus.Point(0.5, 0.5))));
+                .Resize(10, 10, ResizeMode.Fit, r => r.Focus(ImageFocus.Point(0.5, 0.5))));
     }
 
     [Fact]
-    public void Focus_on_ImageSize_requires_an_explicit_crop_mode()
+    public void Focus_requires_an_explicit_crop_mode()
     {
-        // No Resize(ImageSize, Action) overload that silently forces Pad.
+        // No Resize(width, height, Action) / Resize(ImageSize, Action) that silently forces Fit.
         Assert.Throws<ArgumentException>(() =>
             ImagePipeline.Create()
-                .Resize(ImageSize.S, ResizeMode.Pad, r => r.Focus(ImageFocus.Point(0.5, 0.5))));
+                .Resize(ImageSize.S, ResizeMode.Fit, r => r.Focus(ImageFocus.Point(0.5, 0.5))));
 
         var pipeline = ImagePipeline.Create()
             .Resize(ImageSize.S, ResizeMode.Crop, r => r.Focus(ImageFocus.Point(0.5, 0.5)))
@@ -188,12 +188,13 @@ public class ImageArgumentTests
     }
 
     [Fact]
-    public void Fit_rejects_an_aspect_ratio_without_a_canvas_or_a_pixel_size()
+    public void Fit_rejects_an_aspect_ratio_without_a_pixel_size()
     {
         Assert.Throws<ArgumentException>(() =>
             ImageTransforms.Resize(null!, null!, new ImageResize(ImageEncoding.Jpeg())
             {
                 Aspect = ImageAspectRatio.Square,
+                Mode = ResizeMode.Fit,
             }));
     }
 

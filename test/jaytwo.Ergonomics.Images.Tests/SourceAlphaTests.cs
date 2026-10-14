@@ -9,7 +9,7 @@ public class SourceAlphaTests
     public void Create_configure_flattens_source_alpha_before_geometry()
     {
         var pipeline = ImagePipeline.Create(s => s.SourceAlpha(AlphaBehavior.Flatten(ImageColor.White)))
-            .Resize(80, 80, r => r.Canvas(ImageCanvas.Transparent))
+            .Resize(80, 80, ResizeMode.Pad, r => r.Canvas(ImageCanvas.Transparent))
             .EncodingPng();
 
         var output = Transform.Png(SampleImages.AlphaHalvesPng(80, 40), (source, destination) =>
@@ -40,6 +40,7 @@ public class SourceAlphaTests
             {
                 Width = 80,
                 Height = 80,
+                Mode = ResizeMode.Pad,
                 Canvas = ImageCanvas.Transparent,
                 SourceAlpha = AlphaBehavior.Preserve,
             }));
@@ -63,6 +64,7 @@ public class SourceAlphaTests
             {
                 Width = 80,
                 Height = 80,
+                Mode = ResizeMode.Pad,
                 Canvas = ImageCanvas.Transparent,
                 SourceAlpha = AlphaBehavior.Flatten(ImageColor.White),
             }));
@@ -85,6 +87,7 @@ public class SourceAlphaTests
             {
                 Width = 80,
                 Height = 80,
+                Mode = ResizeMode.Pad,
                 Canvas = ImageCanvas.Checkerboard,
                 SourceAlpha = AlphaBehavior.Preserve,
             }));
@@ -109,6 +112,7 @@ public class SourceAlphaTests
                 {
                     Width = 80,
                     Height = 80,
+                    Mode = ResizeMode.Pad,
                     Canvas = ImageCanvas.Transparent,
                     SourceAlpha = AlphaBehavior.Preserve,
                 }));
@@ -132,6 +136,7 @@ public class SourceAlphaTests
                 {
                     Width = 80,
                     Height = 80,
+                    Mode = ResizeMode.Pad,
                     Canvas = ImageCanvas.SolidBlack,
                     SourceAlpha = AlphaBehavior.Preserve,
                 }));

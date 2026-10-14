@@ -94,6 +94,45 @@ internal static class SampleImages
         return stream.ToArray();
     }
 
+    /// <summary>
+    /// Writes a tiny JPEG with optional raw GPS IFD3 strings (omit a tag by passing null).
+    /// </summary>
+    public static byte[] JpegWithGpsTags(
+        string? latitude = null,
+        string? latitudeRef = null,
+        string? longitude = null,
+        string? longitudeRef = null)
+    {
+        using var image = Solid(16, 8, 30, 140, 60);
+        using var tagged = image.Mutate(mutable =>
+        {
+            mutable.Set(GValue.GIntType, "orientation", 1);
+            if (latitude != null)
+            {
+                mutable.Set(GValue.GStrType, "exif-ifd3-GPSLatitude", latitude);
+            }
+
+            if (latitudeRef != null)
+            {
+                mutable.Set(GValue.GStrType, "exif-ifd3-GPSLatitudeRef", latitudeRef);
+            }
+
+            if (longitude != null)
+            {
+                mutable.Set(GValue.GStrType, "exif-ifd3-GPSLongitude", longitude);
+            }
+
+            if (longitudeRef != null)
+            {
+                mutable.Set(GValue.GStrType, "exif-ifd3-GPSLongitudeRef", longitudeRef);
+            }
+        });
+
+        var stream = new MemoryStream();
+        tagged.JpegsaveStream(stream, q: 95, keep: Enums.ForeignKeep.All);
+        return stream.ToArray();
+    }
+
     private static Image Solid(int width, int height, byte red, byte green, byte blue)
     {
         using var canvas = Image.Black(width, height);

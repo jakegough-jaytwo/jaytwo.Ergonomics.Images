@@ -75,6 +75,67 @@ public class IdentifyTests
     }
 
     [Fact]
+    public void Identify_resolves_southern_and_western_gps()
+    {
+        // Sydney Opera House area
+        var bytes = SampleImages.HorizontalHalves(16, 8, latitude: -33.8568, longitude: 151.2153);
+
+        using var source = new MemoryStream(bytes);
+        var meta = ImageTransforms.Identify(source);
+
+        Assert.NotNull(meta.Gps);
+        Assert.InRange(meta.Gps!.Latitude, -33.8570, -33.8566);
+        Assert.InRange(meta.Gps!.Longitude, 151.2151, 151.2155);
+    }
+
+    [Fact]
+    public void Identify_gps_accepts_a_single_rational_degree()
+    {
+        var bytes = SampleImages.JpegWithGpsTags(
+            latitude: "377749/10000",
+            latitudeRef: "N",
+            longitude: "1224194/10000",
+            longitudeRef: "W");
+
+        using var source = new MemoryStream(bytes);
+        var meta = ImageTransforms.Identify(source);
+
+        Assert.NotNull(meta.Gps);
+        Assert.InRange(meta.Gps!.Latitude, 37.7748, 37.7750);
+        Assert.InRange(meta.Gps!.Longitude, -122.4195, -122.4193);
+    }
+
+    [Fact]
+    public void Identify_gps_is_null_when_hemisphere_ref_is_missing()
+    {
+        var bytes = SampleImages.JpegWithGpsTags(
+            latitude: "37/1 46/1 2964/100",
+            latitudeRef: "N",
+            longitude: "122/1 25/1 984/100",
+            longitudeRef: null);
+
+        using var source = new MemoryStream(bytes);
+        var meta = ImageTransforms.Identify(source);
+
+        Assert.Null(meta.Gps);
+    }
+
+    [Fact]
+    public void Identify_gps_is_null_when_latitude_is_out_of_range()
+    {
+        var bytes = SampleImages.JpegWithGpsTags(
+            latitude: "91/1 0/1 0/1",
+            latitudeRef: "N",
+            longitude: "10/1 0/1 0/1",
+            longitudeRef: "E");
+
+        using var source = new MemoryStream(bytes);
+        var meta = ImageTransforms.Identify(source);
+
+        Assert.Null(meta.Gps);
+    }
+
+    [Fact]
     public void Identify_rejects_non_image()
     {
         using var source = new MemoryStream(new byte[] { 1, 2, 3, 4 });

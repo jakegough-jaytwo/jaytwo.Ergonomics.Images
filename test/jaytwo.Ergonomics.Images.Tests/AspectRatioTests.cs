@@ -60,6 +60,7 @@ public class AspectRatioTests
         var output = Transform.Png(SampleImages.SolidJpeg(400, 200, 30, 140, 60), (source, destination) => ImageTransforms.Resize(source, destination, new ImageResize(ImageEncoding.Png())
         {
             Aspect = ImageAspectRatio.Square,
+            Mode = ResizeMode.Pad,
             Canvas = ImageCanvas.SolidWhite,
         }));
 
@@ -93,6 +94,7 @@ public class AspectRatioTests
             Width = 400,
             Height = 300,
             Aspect = ImageAspectRatio.Square,
+            Mode = ResizeMode.Pad,
             Canvas = ImageCanvas.SolidWhite,
         }));
 
@@ -107,7 +109,7 @@ public class AspectRatioTests
     public void Fluent_both_sides_and_aspect_match_the_bag()
     {
         var pipeline = ImagePipeline.Create()
-            .Resize(400, 300, r => r.Aspect(ImageAspectRatio.Square).Canvas(ImageCanvas.SolidWhite))
+            .Resize(400, 300, ResizeMode.Pad, r => r.Aspect(ImageAspectRatio.Square).Canvas(ImageCanvas.SolidWhite))
             .EncodingPng();
 
         var output = Transform.Png(SampleImages.SolidJpeg(800, 200, 30, 140, 60), (source, destination) =>

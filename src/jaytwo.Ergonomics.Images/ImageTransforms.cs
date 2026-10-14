@@ -68,7 +68,7 @@ public static class ImageTransforms
     }
 
     /// <summary>
-    /// Pads the image inside the requested size and keeps the aspect ratio (<see cref="ResizeMode.Pad"/>).
+    /// Fits the image inside the requested size and keeps the aspect ratio (<see cref="ResizeMode.Fit"/>).
     /// </summary>
     /// <remarks>
     /// Omit <paramref name="width"/> and <paramref name="height"/> to keep the source size.
@@ -76,7 +76,7 @@ public static class ImageTransforms
     /// scales inside the box and one side can be shorter. The whole image stays visible.
     /// <paramref name="enlarge"/> false (the default) leaves a source smaller than the box at its own size.
     /// Pass <paramref name="enlarge"/> true to allow upscaling.
-    /// Crop, distort, a canvas, or an aspect ratio belongs on <see cref="ImageResize"/> or <see cref="ImagePipeline"/>.
+    /// Pad, crop, stretch, a canvas, or an aspect ratio belongs on <see cref="ImageResize"/> or <see cref="ImagePipeline"/>.
     /// </remarks>
     /// <returns>The width and height written.</returns>
     public static ImageSize Resize(
@@ -96,7 +96,7 @@ public static class ImageTransforms
     }
 
     /// <summary>
-    /// Pads the image inside <paramref name="size"/> and keeps the aspect ratio (<see cref="ResizeMode.Pad"/>).
+    /// Fits the image inside <paramref name="size"/> and keeps the aspect ratio (<see cref="ResizeMode.Fit"/>).
     /// </summary>
     /// <remarks>
     /// One side of the result can be shorter. The whole image stays visible.

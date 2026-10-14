@@ -60,6 +60,12 @@ public sealed class ImageMetadata
     /// Gets GPS coordinates in decimal degrees from <see cref="ExifMetadata.Ifd3"/>, when both
     /// latitude and longitude parse. Null when either is missing or malformed.
     /// </summary>
+    /// <remarks>
+    /// Requires value tags and hemisphere Refs (<c>GPSLatitude</c>/<c>GPSLatitudeRef</c> and
+    /// <c>GPSLongitude</c>/<c>GPSLongitudeRef</c>). Values may be a DMS triplet, degrees+minutes,
+    /// or a single rational already in degrees. Absolute values outside ±90 (lat) or ±180 (lon)
+    /// are treated as malformed. Missing Ref → null (not assumed north/east).
+    /// </remarks>
     public ImageGps? Gps => Exif.Ifd3.Gps;
 
     /// <summary>Gets the camera make from <see cref="ExifIfd0.Make"/>, when present.</summary>

@@ -34,7 +34,7 @@ public sealed class ExifIfd3 : ExifIfd
 
     /// <summary>
     /// Gets decimal-degree coordinates when latitude and longitude both parse.
-    /// Same as <see cref="ImageMetadata.Gps"/>.
+    /// Same as <see cref="ImageMetadata.Gps"/> (requires value + hemisphere Ref on both axes).
     /// </summary>
     public ImageGps? Gps => ExifConvenience.ReadGps(this);
 }

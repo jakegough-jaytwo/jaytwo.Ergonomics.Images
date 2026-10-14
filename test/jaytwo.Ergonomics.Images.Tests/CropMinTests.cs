@@ -16,8 +16,11 @@ public class CropMinTests
         }));
 
         using var image = DecodedImage.Open(output);
-        Assert.Equal(300, image.Width);
-        Assert.Equal(120, image.Height);
+        Assert.Equal(500, image.Width);
+        Assert.Equal(200, image.Height);
+        Assert.True(image.HasAlpha);
+        image.AlphaNear(2, 100, 0);
+        image.Near(250, 100, 30, 140, 60);
     }
 
     [Fact]

@@ -95,7 +95,7 @@ ImagePipeline.Create(s => s.SourceAlpha(AlphaBehavior.Flatten(ImageColor.White))
     .EncodingWebP();
 ```
 
-`.Resize` sets the frame and optional mode (`Pad`, `Crop`, or `Distort`; defaults to `Pad`). Upscale is off unless `r.Enlarge(true)` / bag `enlarge: true`. `.Encoding` takes a format-specific object (`ImageEncoding.Jpeg`, `WebP`, `Png`, …) so each format only exposes valid options: JPEG has quality and `AlphaFallbackColor`; WebP takes `WebPCompression` (lossy quality via `WebP(80)` / `WebPCompression.Lossy(80)`, or `WebPCompression.Lossless`); PNG has neither. JPEG, lossy WebP, and AVIF default to quality 85. Shortcuts such as `.EncodingJpeg()`, `.EncodingWebP()`, `.EncodingWebP(WebPCompression.Lossless)`, and `.EncodingPng()` are available. Omit the `Create` configure action to auto-orient and preserve source transparency. Metadata and format options live on encoding.
+`.Resize` sets the frame and optional mode (`Fit`, `Pad`, `Crop`, or `Stretch`; defaults to `Fit`). Upscale is off unless `r.Enlarge(true)` / bag `enlarge: true`. `.Encoding` takes a format-specific object (`ImageEncoding.Jpeg`, `WebP`, `Png`, …) so each format only exposes valid options: JPEG has quality and `AlphaFallbackColor`; WebP takes `WebPCompression` (lossy quality via `WebP(80)` / `WebPCompression.Lossy(80)`, or `WebPCompression.Lossless`); PNG has neither. JPEG, lossy WebP, and AVIF default to quality 85. Shortcuts such as `.EncodingJpeg()`, `.EncodingWebP()`, `.EncodingWebP(WebPCompression.Lossless)`, and `.EncodingPng()` are available. Omit the `Create` configure action to auto-orient and preserve source transparency. Metadata and format options live on encoding.
 
 Presets are ordinary pipelines:
 
@@ -133,11 +133,11 @@ using var destination = File.Create(outputPath);
 var size = ImageTransforms.Resize(source, destination, ImageEncoding.Jpeg(), 1920, 1080);
 ```
 
-`size` is the pixels in `destination`. This call pads the whole image inside the box (`ResizeMode.Pad`). A source smaller than 1920×1080 stays at its own size unless you pass `enlarge: true`.
+`size` is the pixels in `destination`. This call fits the whole image inside the box (`ResizeMode.Fit`). A source smaller than 1920×1080 stays at its own size unless you pass `enlarge: true`.
 
 `ImageTransforms.Resize(source, destination, ImageEncoding.Jpeg())` re-encodes at the current size. Auto-orient still runs, so a sideways photo comes back upright.
 
-Passing width, height, or both on that overload pads the image inside that limit and keeps the aspect ratio. One side of a box can come back short. There are no bars and no cover-crop. A missing side is calculated from the source aspect. When neither is passed, the source size is kept.
+Passing width, height, or both on that overload fits the image inside that limit and keeps the aspect ratio. One side of a box can come back short. There are no bars and no cover-crop. A missing side is calculated from the source aspect. When neither is passed, the source size is kept.
 
 `ImageResize` is the call that sets a mode, a canvas, or an aspect ratio.
 
@@ -158,21 +158,25 @@ ImageTransforms.Resize(source, destination, new ImageResize(ImageEncoding.Jpeg()
 ImageTransforms.Resize(source, destination, new ImageResize(ImageEncoding.Jpeg())
 {
     Aspect = ImageAspectRatio.Square,
+    Mode = ResizeMode.Pad,
     Canvas = ImageCanvas.SolidBlack,
 });
 ```
 
 ## Resize mode and canvas
 
-Magick-style labels: pad inside the frame, crop to fill, or distort to the exact size.
+Mode picks the size policy. Canvas is paint only (never switches Fit into Pad).
 
 | `ResizeMode` | Result |
 | --- | --- |
-| `Pad` | Aspect ratio stays. The whole image scales inside the frame (contain). One side can come back short. A canvas is a separate choice and is what makes the output match the frame. |
-| `Crop` | Aspect ratio stays. The image scales until the frame is filled, then the overflow is discarded (cover). The center is kept. `ImageFocus` moves that window so a relative rectangle stays inside it. When the rectangle does not fit, cropping stops there and the rest of the frame is canvas. With enlarge on, the output matches the frame. With enlarge off (the default), a window that still has the frame's aspect ratio can be smaller than the frame. A window that stopped early still paints the frame. Not the same as the `.Crop(x, y, width, height)` stage, which extracts an explicit rectangle. |
-| `Distort` | Exactly the requested size. Aspect ratio is ignored. Enlarge does not apply. |
+| `Fit` | Aspect ratio stays. The whole image scales inside the frame. One side can come back short. Canvas is rejected. |
+| `Pad` | Aspect ratio stays. Scales inside the frame, then letterboxes so the output is always the frame. Gaps use `ImageCanvas` (transparent if omitted). |
+| `Crop` | Aspect ratio stays. Scales until the frame is filled, then discards overflow (cover). The center is kept unless `ImageFocus` moves the window. When both dimensions are set, the output is always the frame; underfill and focus remainders use canvas (transparent if omitted). Not the same as the `.Crop(x, y, width, height)` stage, which extracts an explicit rectangle. |
+| `Stretch` | Exactly the requested size. Aspect ratio is ignored. Enlarge does not apply. Canvas is rejected. |
 
-A canvas applies with `Pad`. On `Crop`, a canvas is only the remainder when `Focus` does not fit; without `Focus`, Crop rejects a canvas. The output matches the frame when a plate is used. Enlarge stays off by default, so a smaller source does not grow; with a Pad canvas the frame is still painted. Configure canvas on that stage: `.Resize(..., r => r.Canvas(...))` or `.Rotate(..., r => r.Expand().Canvas(...))`. On a rotation, canvas requires Expand (it does not convert Trim to Expand).
+Peers: Fit ≈ Sharp `inside`; Pad ≈ Sharp `contain` / Cloudinary `c_pad`; Crop ≈ Sharp `cover`; Stretch ≈ Sharp `fill` (Sharp’s stretch name — not our `Crop`).
+
+Default mode is `Fit`. Enlarge stays off by default. Configure canvas on Pad/Crop (or rotate Expand): `.Resize(..., ResizeMode.Pad, r => r.Canvas(...))` or `.Rotate(..., r => r.Expand().Canvas(...))`. On a rotation, canvas requires Expand (it does not convert Trim to Expand).
 
 Canvas plates are RGB (`ImageColor` is three 8-bit channels). The image on the plate must already be RGB or RGBA. Greyscale and other band layouts throw when a canvas is applied — there is no silent colorspace conversion. Omit the canvas, or convert the source to RGB first (see `todo/rgb-canvas.md`).
 
@@ -271,9 +275,9 @@ The frame comes from the width and height, an `ImageAspectRatio`, or both.
 
 | What is set | Frame |
 | --- | --- |
-| Width, height, or both | That pixel box. One side on a pad, with no aspect ratio, is completed from the source. |
+| Width, height, or both | That pixel box. One side on Fit, with no aspect ratio, is completed from the source. |
 | Aspect ratio only, `Crop` | Discard overflow until the image has that ratio, at the source size. The center is kept. A focus box moves that window. |
-| Aspect ratio only, `Pad` and a canvas | Pad to that ratio at the source size. |
+| Aspect ratio only, `Pad` | Letterbox to that ratio at the source size (canvas defaults to transparent). |
 | Aspect ratio and one side | The other side is calculated from the ratio. |
 | Aspect ratio and both sides | The sides are a maximum box. The frame is the largest rectangle of that ratio inside the box. |
 
@@ -281,7 +285,7 @@ Named ratios are `Square`, `FourByThree`, `ThreeByFour`, `SixteenByNine`, and `N
 
 ## Sizes
 
-`ImageSize` is a width and height. `Resize` returns the size it wrote. The named sizes are square frames. A pad keeps the aspect ratio, so one side can come back short.
+`ImageSize` is a width and height. `Resize` returns the size it wrote. The named sizes are square frames. Fit keeps the aspect ratio, so one side can come back short.
 
 | Size | Frame |
 | --- | --- |
@@ -308,9 +312,11 @@ ImageTransforms.Resize(source, destination, new ImageResize(
 {
     Width = 512,
     Height = 512,
+    Mode = ResizeMode.Pad,
     Canvas = ImageCanvas.SolidBlack,
 });
 ```
+
 
 | Property | Default | Meaning |
 | --- | --- | --- |
@@ -320,7 +326,7 @@ ImageTransforms.Resize(source, destination, new ImageResize(
 | `Quality` | see notes | On JPEG, AVIF, and HEIC factories. Defaults are `DefaultJpegQuality` / `DefaultAvifQuality` / `DefaultHeicQuality` (all 85). Range 1-100. PNG, GIF, and TIFF have no quality. |
 | `Compression` | lossy 85 | On WebP encoding only. `WebPCompression.Lossy(quality)` or `WebPCompression.Lossless`. `ImageEncoding.WebP(80)` is lossy shorthand. |
 | `AlphaFallbackColor` | white | On JPEG encoding only. Used when remaining alpha cannot be stored. |
-| `Enlarge` | false | Allow upscaling on Pad/Crop. Distort always writes the requested size. |
+| `Enlarge` | false | Allow upscaling on Fit/Pad/Crop. Stretch always writes the requested size. |
 
 Pass encoding overrides only when a default should change. Shortcuts and the pipeline share `ImageEncoding`. Auto-orient is not on encoding.
 
@@ -374,6 +380,10 @@ Identify opens the header (typical formats do not force a full pixel decode). It
 ### Date taken
 
 `DateTaken` reads `DateTimeOriginal`, then `DateTimeDigitized`, and returns the first one that parses. It never reads the IFD0 `DateTime` tag (exiftool's `ModifyDate`). That tag is the file's last-modified time, and editing software rewrites it. When neither tag parses, `DateTaken` is null. The library reads a stream, so it has no file timestamps to fall back on; the caller chooses the fallback.
+
+### GPS
+
+`Gps` / `Exif.Ifd3.Gps` need both axes: value + hemisphere Ref (`N`/`S`, `E`/`W`). Missing Ref → null (north/east is not assumed). Coordinate text may be a DMS triplet, degrees+minutes, or a single rational already in degrees. Absolute values above 90° (lat) or 180° (lon) are treated as malformed.
 
 The parsing rules follow common EXIF readers rather than the strict spec format (`yyyy:MM:dd HH:mm:ss`):
 
@@ -528,7 +538,7 @@ Copyright licenses and HEVC patents are different things. This README does not m
 
 **PhotoSauce MagicScaler** has the same product shape: a small, hard-to-misuse resize API with serious attention to orientation, quality, and metadata. Its best path is Windows WIC. This library makes the opposite runtime bet: libvips on Windows, macOS, and Linux, with HEIC left to the host instead of a bundled HEVC decoder.
 
-**Sharp** is the libvips API people already know (`contain`, `cover`, `fill`, gravity). It is Node. The Magick-style modes here are the same set of outcomes: `Pad` (contain, optional canvas), `Crop` (cover, optional focus), `Distort` (fill/stretch).
+**Sharp** is the libvips API people already know (`inside`, `contain`, `cover`, `fill`, gravity). It is Node. Modes here map as Fit ≈ `inside`, Pad ≈ `contain`, Crop ≈ `cover`, Stretch ≈ `fill`.
 
 ## Behavior notes
 
