@@ -57,6 +57,25 @@ public class OrientationTests
         }
     }
 
+    // Photo-sized, so the upside-down autorot reads rows the sequential JPEG decoder has already passed.
+    [Theory]
+    [InlineData(3)]
+    [InlineData(4)]
+    public void Auto_orient_flips_a_large_jpeg_from_a_non_seekable_source(int orientation)
+    {
+        var bytes = SampleImages.HorizontalHalves(4032, 3024, orientation);
+        using var source = new NonSeekableStream(new MemoryStream(bytes));
+        using var destination = new MemoryStream();
+        var size = ImagePipeline.Create()
+            .Resize(ImageSize.L)
+            .EncodingWebP()
+            .Run(source, destination);
+
+        using var image = DecodedImage.Open(destination.ToArray());
+        Assert.Equal(1024, size.Width);
+        Assert.Equal(size.Width, image.Width);
+    }
+
     [Fact]
     public void Disabling_auto_orient_keeps_the_stored_raster()
     {

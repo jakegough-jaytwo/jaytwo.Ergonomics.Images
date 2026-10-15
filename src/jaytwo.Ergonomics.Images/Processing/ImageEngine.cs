@@ -298,7 +298,7 @@ internal static class ImageEngine
             encoding,
             (input, loaderOptions, owned) =>
             {
-                var image = LoadOriented(input, autoOrient, loaderOptions, owned);
+                var image = LoadOriented(input, autoOrient, loaderOptions, outOfOrder: true, owned);
                 image = ApplySourceAlpha(image, sourceAlpha, owned);
                 image = Turn(image, rotation, bounds, aspect, canvas ?? ImageCanvas.Transparent, owned);
                 return ClearOrientation(image, owned);
@@ -340,6 +340,15 @@ internal static class ImageEngine
     /// Covered by non-seekable orientation tests.
     /// </summary>
     internal static Image LoadOriented(Stream source, bool autoOrient, string? loaderOptions, List<IDisposable> owned)
+        => LoadOriented(source, autoOrient, loaderOptions, outOfOrder: false, owned);
+
+    /// <summary>
+    /// A sequential JPEG can't be read bottom-up past libvips's small line cache, so anything
+    /// that does (a rotate op, or autorot of EXIF 3/4) fails with "out of order read" on
+    /// photo-sized images. Those cases decode the whole image into memory first.
+    /// Pass <paramref name="outOfOrder"/> when later ops will rotate.
+    /// </summary>
+    internal static Image LoadOriented(Stream source, bool autoOrient, string? loaderOptions, bool outOfOrder, List<IDisposable> owned)
     {
         var vipsSource = new VipsStreamSource(source);
         owned.Add(vipsSource);
@@ -349,6 +358,12 @@ internal static class ImageEngine
             access: Enums.Access.Sequential,
             failOn: Enums.FailOn.Error);
         owned.Add(image);
+        if (outOfOrder || (autoOrient && FlipsVertically(image)))
+        {
+            image = image.CopyMemory();
+            owned.Add(image);
+        }
+
         if (!autoOrient)
         {
             return image;
@@ -463,7 +478,8 @@ internal static class ImageEngine
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var input = PrepareInput(source, out var loaderOptions);
-                var image = LoadOriented(input, autoOrient, loaderOptions, owned);
+                var rotates = Array.Exists(ops, op => op is PipelineOp.RotateOp);
+                var image = LoadOriented(input, autoOrient, loaderOptions, outOfOrder: rotates, owned);
                 image = ApplySourceAlpha(image, sourceAlpha, owned);
                 for (var i = 0; i < ops.Length; i++)
                 {
@@ -1228,6 +1244,13 @@ internal static class ImageEngine
         }
 
         return color;
+    }
+
+    // EXIF 3 (180) and 4 (vertical flip) are the orientations autorot reads bottom-up.
+    private static bool FlipsVertically(Image image)
+    {
+        return image.Contains("orientation")
+            && Convert.ToInt32(image.Get("orientation"), System.Globalization.CultureInfo.InvariantCulture) is 3 or 4;
     }
 
     private static Image ClearOrientation(Image image, List<IDisposable> owned)

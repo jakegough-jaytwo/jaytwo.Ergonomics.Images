@@ -336,6 +336,29 @@ public class RotationTests
         Assert.True(image.Height > 40);
     }
 
+    // Photo-sized, so the turn reads rows the sequential JPEG decoder has already passed.
+    [Theory]
+    [InlineData(1, 180d)]
+    [InlineData(3, 4d)]
+    [InlineData(6, 4d)]
+    [InlineData(8, -4d)]
+    public void Pipeline_rotates_a_large_jpeg_from_a_non_seekable_source(int orientation, double degrees)
+    {
+        var bytes = SampleImages.HorizontalHalves(4032, 3024, orientation);
+        using var source = new NonSeekableStream(new MemoryStream(bytes));
+        using var destination = new MemoryStream();
+        var rotation = degrees > 0 ? ImageRotation.Clockwise(degrees) : ImageRotation.CounterClockwise(-degrees);
+        var size = ImagePipeline.Create()
+            .Rotate(rotation)
+            .Crop(0.1, 0.05, 0.7, 0.8)
+            .Resize(ImageSize.L)
+            .EncodingWebP()
+            .Run(source, destination);
+
+        using var image = DecodedImage.Open(destination.ToArray());
+        Assert.Equal(size.Width, image.Width);
+    }
+
     [Fact]
     public void Rotate_rejects_a_null_request()
     {
