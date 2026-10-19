@@ -40,11 +40,11 @@ public class PipelineTests
         var size2 = pipeline.Run(source2, destination2);
 
         Assert.Equal(size1, size2);
-        Assert.Equal(new ImageSize(256, 128), size1);
+        Assert.Equal(new ImageSize(288, 144), size1);
     }
 
     [Fact]
-    public void Thumbnail_preset_fits_inside_256()
+    public void Thumbnail_preset_fits_inside_288()
     {
         var output = Transform.Png(SampleImages.SolidJpeg(400, 200, 30, 140, 60), (source, destination) =>
             ImagePipeline.Preset(ImagePresets.ThumbnailWebP)
@@ -52,8 +52,8 @@ public class PipelineTests
                 .Run(source, destination));
 
         using var image = DecodedImage.Open(output);
-        Assert.Equal(256, image.Width);
-        Assert.Equal(128, image.Height);
+        Assert.Equal(288, image.Width);
+        Assert.Equal(144, image.Height);
     }
 
     [Fact]

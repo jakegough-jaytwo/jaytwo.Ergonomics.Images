@@ -57,7 +57,7 @@ This library is that API. It is a thin layer on libvips.
 
 - `ImagePipeline`, a reusable ordered fluent specification that runs from `Stream` to `Stream` (`Run` or `RunAsync`) and returns the size written. Compatible stages share one lazy libvips graph and encode once.
 - Thin shortcuts: `ImageTransforms.Resize`, `ImageTransforms.Rotate`, and `ImageTransforms.Crop` compile into a pipeline. Pad is the short resize call. `ImageResize` / `ImageRotate` / `ImageCrop` remain option bags for those shortcuts. Shortcuts and the pipeline share `ImageEncoding`.
-- Square `ImageSize` frames from 128 to 4096. `Thumbnail` is `S`. `Preview` is `L`. `ImagePresets.ThumbnailWebP` / `PreviewWebP` are pipelines (frame + WebP) built from the same primitives.
+- Square `ImageSize` frames from 144 to 4032. `Thumbnail` is `S`. `Preview` is `L`. `ImagePresets.ThumbnailWebP` / `PreviewWebP` are pipelines (frame + WebP) built from the same primitives.
 - Visual dimensions by default (`Autorot` before geometry)
 - A small metadata policy: keep, strip, or keep the color profile only
 - `ImageTransforms.Identify` for layered structure + EXIF/XMP/IPTC/ICC bags and common capture/GPS/camera fields
@@ -289,14 +289,31 @@ Named ratios are `Square`, `FourByThree`, `ThreeByFour`, `SixteenByNine`, and `N
 
 | Size | Frame |
 | --- | --- |
-| `XS` | 128 × 128 |
-| `S`, `Thumbnail` | 256 × 256 |
-| `M` | 512 × 512 |
-| `L`, `Preview` | 1024 × 1024 |
-| `XL` | 2048 × 2048 |
-| `XXL` | 4096 × 4096 |
+| `XS` | 144 × 144 |
+| `S`, `Thumbnail` | 288 × 288 |
+| `M` | 576 × 576 |
+| `L`, `Preview` | 1008 × 1008 |
+| `XL` | 2016 × 2016 |
+| `XXL` | 4032 × 4032 |
 
 `Thumbnail` is `S`. `Preview` is `L`. Any other frame is `new ImageSize(width, height)`. A named size is only the frame. It does not change the mode, the canvas, or the metadata policy.
+
+### Why this progression
+
+The progression combines two doubling families with different anchors:
+
+| Family | Sizes | Anchor |
+| --- | --- | --- |
+| UI and thumbnail | 144, 288, 576 | A grid-friendly 144-pixel base, doubled for each step |
+| Photo delivery | 1008, 2016, 4032 | A 4032-pixel source edge, halved for each step |
+
+The lower family favors layout flexibility. The 144-pixel base divides evenly by common grid counts, and doubling it gives natural 1×, 2×, and 4× levels. It also keeps common photographic ratios on whole pixels: a fitted 16:9 image writes 144×81, 288×162, or 576×324; 4:3 and 3:2 images are integral at the same levels.
+
+The upper family is anchored at 4032, the long edge of a common 12 MP 4032×3024 photo. Halving that edge produces 2016 and 1008 without introducing rounding. A 4:3 source therefore has exact 4032×3024, 2016×1512, and 1008×756 levels. The same frames also keep 16:9 and 3:2 dimensions integral.
+
+The 576-to-1008 transition is intentionally not a doubling. It is where the priority changes from the 144-based UI scale to exact reductions of the 4032 photo anchor. The families still meet on the same grid because 1008 is seven times 144; in fact, every named size is a multiple of 144.
+
+These presets optimize for photo ratios and reusable derivative levels, not power-of-two textures or exact video canvases. They remain square maximum frames: for example, fitting a landscape 16:9 image into `ImageSize.L` writes 1008×567. Use a custom `ImageSize`, such as 1920×1080, when the frame itself must match a display standard.
 
 ```csharp
 var size = ImageTransforms.Resize(source, destination, ImageEncoding.Jpeg(), ImageSize.Preview);

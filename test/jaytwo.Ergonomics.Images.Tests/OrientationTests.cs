@@ -72,7 +72,7 @@ public class OrientationTests
             .Run(source, destination);
 
         using var image = DecodedImage.Open(destination.ToArray());
-        Assert.Equal(1024, size.Width);
+        Assert.Equal(1008, size.Width);
         Assert.Equal(size.Width, image.Width);
     }
 

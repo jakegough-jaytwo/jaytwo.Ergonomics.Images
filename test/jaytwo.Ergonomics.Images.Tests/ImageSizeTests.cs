@@ -7,12 +7,12 @@ public class ImageSizeTests
     [Fact]
     public void Named_sizes_are_square_and_the_aliases_match()
     {
-        Assert.Equal(new ImageSize(128, 128), ImageSize.XS);
-        Assert.Equal(new ImageSize(256, 256), ImageSize.S);
-        Assert.Equal(new ImageSize(512, 512), ImageSize.M);
-        Assert.Equal(new ImageSize(1024, 1024), ImageSize.L);
-        Assert.Equal(new ImageSize(2048, 2048), ImageSize.XL);
-        Assert.Equal(new ImageSize(4096, 4096), ImageSize.XXL);
+        Assert.Equal(new ImageSize(144, 144), ImageSize.XS);
+        Assert.Equal(new ImageSize(288, 288), ImageSize.S);
+        Assert.Equal(new ImageSize(576, 576), ImageSize.M);
+        Assert.Equal(new ImageSize(1008, 1008), ImageSize.L);
+        Assert.Equal(new ImageSize(2016, 2016), ImageSize.XL);
+        Assert.Equal(new ImageSize(4032, 4032), ImageSize.XXL);
         Assert.Equal(ImageSize.S, ImageSize.Thumbnail);
         Assert.Equal(ImageSize.L, ImageSize.Preview);
     }
@@ -23,12 +23,12 @@ public class ImageSizeTests
         var output = Transform.Png(SampleImages.SolidPng(800, 400, 30, 140, 60), (source, destination) =>
         {
             var size = ImageTransforms.Resize(source, destination, ImageEncoding.Png(), ImageSize.Thumbnail);
-            Assert.Equal(new ImageSize(256, 128), size);
+            Assert.Equal(new ImageSize(288, 144), size);
         });
 
         using var image = DecodedImage.Open(output);
-        Assert.Equal(256, image.Width);
-        Assert.Equal(128, image.Height);
+        Assert.Equal(288, image.Width);
+        Assert.Equal(144, image.Height);
     }
 
     [Fact]
@@ -37,12 +37,12 @@ public class ImageSizeTests
         var output = Transform.Png(SampleImages.SolidPng(100, 400, 30, 140, 60), (source, destination) =>
         {
             var size = ImageTransforms.Resize(source, destination, new ImageResize(ImageEncoding.Png(), ImageSize.S));
-            Assert.Equal(new ImageSize(64, 256), size);
+            Assert.Equal(new ImageSize(72, 288), size);
         });
 
         using var image = DecodedImage.Open(output);
-        Assert.Equal(64, image.Width);
-        Assert.Equal(256, image.Height);
+        Assert.Equal(72, image.Width);
+        Assert.Equal(288, image.Height);
     }
 
     [Fact]

@@ -7,7 +7,7 @@ namespace jaytwo.Ergonomics.Images;
 /// </summary>
 /// <remarks>
 /// Resize returns the size it wrote.
-/// <see cref="XS"/>, <see cref="S"/>, <see cref="M"/>, <see cref="L"/>, <see cref="XL"/>, and <see cref="XXL"/> are square frames, and each doubles the last.
+/// <see cref="XS"/>, <see cref="S"/>, <see cref="M"/>, <see cref="L"/>, <see cref="XL"/>, and <see cref="XXL"/> are square frames.
 /// <see cref="Thumbnail"/> is <see cref="S"/>. <see cref="Preview"/> is <see cref="L"/>.
 /// </remarks>
 public readonly record struct ImageSize
@@ -37,27 +37,27 @@ public readonly record struct ImageSize
     /// <summary>Gets the height in pixels.</summary>
     public int Height { get; }
 
-    /// <summary>128 by 128.</summary>
-    public static ImageSize XS => new(128, 128);
+    /// <summary>144 by 144.</summary>
+    public static ImageSize XS => new(144, 144);
 
-    /// <summary>256 by 256.</summary>
-    public static ImageSize S => new(256, 256);
+    /// <summary>288 by 288.</summary>
+    public static ImageSize S => new(288, 288);
 
-    /// <summary>512 by 512.</summary>
-    public static ImageSize M => new(512, 512);
+    /// <summary>576 by 576.</summary>
+    public static ImageSize M => new(576, 576);
 
-    /// <summary>1024 by 1024.</summary>
-    public static ImageSize L => new(1024, 1024);
+    /// <summary>1008 by 1008.</summary>
+    public static ImageSize L => new(1008, 1008);
 
-    /// <summary>2048 by 2048.</summary>
-    public static ImageSize XL => new(2048, 2048);
+    /// <summary>2016 by 2016.</summary>
+    public static ImageSize XL => new(2016, 2016);
 
-    /// <summary>4096 by 4096.</summary>
-    public static ImageSize XXL => new(4096, 4096);
+    /// <summary>4032 by 4032.</summary>
+    public static ImageSize XXL => new(4032, 4032);
 
-    /// <summary>256 by 256. The same size as <see cref="S"/>.</summary>
+    /// <summary>288 by 288. The same size as <see cref="S"/>.</summary>
     public static ImageSize Thumbnail => S;
 
-    /// <summary>1024 by 1024. The same size as <see cref="L"/>.</summary>
+    /// <summary>1008 by 1008. The same size as <see cref="L"/>.</summary>
     public static ImageSize Preview => L;
 }

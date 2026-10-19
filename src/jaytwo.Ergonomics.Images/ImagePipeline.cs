@@ -16,7 +16,7 @@ namespace jaytwo.Ergonomics.Images;
 /// Metadata and format options live on <see cref="Encoding"/>.
 /// Native stages share one libvips graph and encode once at <see cref="Run"/> or <see cref="RunAsync"/>.
 /// Example:
-/// <c>ImagePipeline.Create().Resize(256, 256, ResizeMode.Crop, r => r.Focus(...)).EncodingWebP().Run(...)</c>.
+/// <c>ImagePipeline.Create().Resize(288, 288, ResizeMode.Crop, r => r.Focus(...)).EncodingWebP().Run(...)</c>.
 /// Resize modes are Fit / Pad / Crop / Stretch.
 /// </remarks>
 public sealed class ImagePipeline
